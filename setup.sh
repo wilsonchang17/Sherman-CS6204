@@ -194,16 +194,18 @@ echo "====== Build complete! ======"
 echo ""
 
 if [ "$NODE_ID" -eq 0 ]; then
+    # Start memcached bound to experiment network IP
+    sudo pkill memcached 2>/dev/null || true
+    sleep 1
+    memcached -p $MEMCACHED_PORT -u nobody -l $MEMCACHED_SERVER_IP -d
+    echo "memcached started on $MEMCACHED_SERVER_IP:$MEMCACHED_PORT"
+    echo ""
     echo "=== Node 0: next steps ==="
-    echo "1. Kill any existing memcached:"
-    echo "   sudo pkill memcached"
-    echo "2. Start memcached bound to experiment network:"
-    echo "   memcached -p $MEMCACHED_PORT -u nobody -l $MEMCACHED_SERVER_IP -d"
-    echo "3. Run benchmark (both nodes at the same time):"
+    echo "Run benchmark (both nodes at the same time):"
     echo "   sudo bash -c 'ulimit -l unlimited && ./benchmark 2 50 22'"
 else
     echo "=== Node 1: next steps ==="
-    echo "Make sure node 0's memcached is running, then run at the same time as node 0:"
+    echo "Make sure node 0's setup.sh has finished, then run at the same time as node 0:"
     echo "   sudo bash -c 'ulimit -l unlimited && ./benchmark 2 50 22'"
 fi
 
