@@ -46,13 +46,47 @@ else
 fi
 
 # -----------------------------------------------------------------------
-# Step 2: Install system dependencies
+# Step 2: Install correct libibverbs-dev from MLNX_LIBS (contains ibv_exp_*)
+# CRITICAL: Must use 41mlnx1 from MLNX_LIBS, NOT 50mlnx1 from UPSTREAM_LIBS
 # -----------------------------------------------------------------------
-echo "[2/6] Installing dependencies..."
+echo "[2/6] Installing libibverbs from MLNX_LIBS..."
+
+IBV_EXP_COUNT=$(grep -c "ibv_exp_" /usr/include/infiniband/verbs.h 2>/dev/null || echo 0)
+if [ "$IBV_EXP_COUNT" -eq 0 ]; then
+    cd /tmp
+    if [ ! -f "$OFED_TGZ" ]; then
+        wget -q "$OFED_URL"
+    fi
+    if [ ! -d "$OFED_DIR" ]; then
+        tar -xzf "$OFED_TGZ"
+    fi
+    MLNX_LIBS="/tmp/${OFED_DIR}/DEBS/MLNX_LIBS"
+    UPSTREAM_LIBS="/tmp/${OFED_DIR}/DEBS/UPSTREAM_LIBS"
+    # Install libibverbs1 first, then libibverbs-dev (41mlnx1 has ibv_exp_*)
+    sudo dpkg -i --force-all \
+        ${MLNX_LIBS}/libibverbs1_41mlnx1-OFED.4.9.3.0.0.49417_amd64.deb \
+        ${MLNX_LIBS}/libibverbs-dev_41mlnx1-OFED.4.9.3.0.0.49417_amd64.deb
+    # Install librdmacm from UPSTREAM_LIBS
+    sudo dpkg -i --force-all \
+        ${UPSTREAM_LIBS}/librdmacm1_50mlnx1-1.49417_amd64.deb \
+        ${UPSTREAM_LIBS}/librdmacm-dev_50mlnx1-1.49417_amd64.deb
+    IBV_EXP_COUNT=$(grep -c "ibv_exp_" /usr/include/infiniband/verbs.h 2>/dev/null || echo 0)
+    if [ "$IBV_EXP_COUNT" -eq 0 ]; then
+        echo "ERROR: ibv_exp_* not found. MLNX_LIBS deb may be missing."
+        exit 1
+    fi
+    echo "ibv_exp_* found ($IBV_EXP_COUNT occurrences). OK."
+else
+    echo "ibv_exp_* already present, skipping."
+fi
+
+# -----------------------------------------------------------------------
+# Step 3: Install remaining system dependencies
+# -----------------------------------------------------------------------
+echo "[3/6] Installing dependencies..."
 sudo apt-get update -qq
 sudo apt-get install -y \
     cmake g++ git \
-    libibverbs-dev librdmacm-dev \
     memcached libmemcached-dev \
     libboost-all-dev \
     infiniband-diags \
