@@ -208,7 +208,11 @@ if [ "$NODE_ID" -eq 0 ]; then
     sudo pkill memcached 2>/dev/null || true
     sleep 1
     memcached -p $MEMCACHED_PORT -u nobody -l $MEMCACHED_SERVER_IP -d
-    echo "memcached started on $MEMCACHED_SERVER_IP:$MEMCACHED_PORT"
+    sleep 1
+    # Initialize serverNum key to 0 so Sherman's memcached_increment works.
+    # Sherman uses incr on this key to assign node IDs; incr fails if key doesn't exist.
+    echo -e "set serverNum 0 0 1\r\n0\r" | nc $MEMCACHED_SERVER_IP $MEMCACHED_PORT
+    echo "memcached started on $MEMCACHED_SERVER_IP:$MEMCACHED_PORT (serverNum initialized)"
     echo ""
     echo "=== Node 0: next steps ==="
     echo "Run benchmark (both nodes at the same time):"
