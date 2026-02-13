@@ -99,9 +99,19 @@ fi
 echo "ibv_exp_* found ($IBV_EXP_COUNT occurrences). OK."
 
 # -----------------------------------------------------------------------
-# Step 3: Install system dependencies
+# Step 3: Fix apt conflicts caused by OFED ibverbs-providers collision,
+# then install system dependencies
 # -----------------------------------------------------------------------
 echo "[3/7] Installing dependencies..."
+
+# OFED installs ibverbs-providers (50mlnx1) which conflicts with Ubuntu's
+# ibverbs-providers and causes apt to be completely broken.
+# Force-remove both conflicting packages and hold them to prevent apt
+# from reinstalling the Ubuntu version.
+sudo dpkg --remove --force-depends ibverbs-providers python3-pyverbs 2>/dev/null || true
+sudo apt-mark hold ibverbs-providers python3-pyverbs 2>/dev/null || true
+sudo apt --fix-broken install -y
+
 sudo apt-get update -qq
 sudo apt-get install -y \
     cmake g++ git \
