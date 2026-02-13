@@ -176,6 +176,19 @@ if grep -q "kLockChipMemSize = 256 \* 1024" include/Common.h; then
     echo "Patched kLockChipMemSize to 128KB in include/Common.h"
 fi
 
+# CRITICAL: Patch NIC selection to use mlx5_2 (ens3f0, experiment network 10.10.1.x)
+# NOT mlx5_0 (eno12399, control network 130.127.x.x).
+# On r6525, mlx5_0 is the control network NIC -- using it sends all RDMA traffic
+# over CloudLab's shared control network, which violates CloudLab policy.
+# Original code selects device whose name has '0' at position 5 (mlx5_0).
+# We change it to '2' to select mlx5_2 (ens3f0, 10.10.1.x).
+if grep -q "deviceList\[i\])\[5\] == '0'" src/rdma/Resource.cpp; then
+    cp src/rdma/Resource.cpp /tmp/Resource.cpp.bak
+    sed "s/deviceList\[i\])\[5\] == '0'/deviceList[i])[5] == '2'/" /tmp/Resource.cpp.bak > /tmp/Resource.cpp
+    cp /tmp/Resource.cpp src/rdma/Resource.cpp
+    echo "Patched NIC selection to mlx5_2 (ens3f0) in src/rdma/Resource.cpp"
+fi
+
 # Write memcached config pointing to node 0
 echo "$MEMCACHED_SERVER_IP" > memcached.conf
 echo "$MEMCACHED_PORT" >> memcached.conf
@@ -195,6 +208,9 @@ grep -q "memlock unlimited" /etc/security/limits.conf || \
 grep -q "hard memlock unlimited" /etc/security/limits.conf || \
     echo "* hard memlock unlimited" | sudo tee -a /etc/security/limits.conf > /dev/null
 
+# Fix ownership in case previous sudo run left root-owned files
+ sudo chown -R $USER ~/Sherman-CS6204/
+
 rm -rf build && mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
@@ -205,6 +221,9 @@ echo ""
 
 if [ "$NODE_ID" -eq 0 ]; then
     # Start memcached bound to experiment network IP
+    # Stop systemd memcached (binds to 127.0.0.1 by default, causes confusion)
+    sudo systemctl stop memcached 2>/dev/null || true
+    sudo systemctl disable memcached 2>/dev/null || true
     sudo pkill memcached 2>/dev/null || true
     sleep 1
     memcached -p $MEMCACHED_PORT -u nobody -l $MEMCACHED_SERVER_IP -d
