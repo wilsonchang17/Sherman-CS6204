@@ -196,17 +196,19 @@ fi
 
 # CRITICAL: Patch NIC selection to use mlx5_2 (experiment network 10.10.1.x)
 # NOT mlx5_0 (control network).
-# On both r6525 and c6525-100g, mlx5_0/mlx5_1 are control network NICs -- using them
-# sends all RDMA traffic over CloudLab's shared control network, violating policy.
-# mlx5_2 is the experiment network NIC on both node types (ens3f0 or ens1f0).
-# Original code selects device whose name has '0' at position 5 (mlx5_0).
-# We change it to '2' to select mlx5_2 (experiment network).
-if grep -q "deviceList\[i\])\[5\] == '0'" src/rdma/Resource.cpp; then
-    cp src/rdma/Resource.cpp /tmp/Resource.cpp.bak
-    sed "s/deviceList\[i\])\[5\] == '0'/deviceList[i])[5] == '2'/" /tmp/Resource.cpp.bak > /tmp/Resource.cpp
-    cp /tmp/Resource.cpp src/rdma/Resource.cpp
-    echo "Patched NIC selection to mlx5_2 (ens3f0) in src/rdma/Resource.cpp"
+# On both r6525 and c6525-100g:
+#   mlx5_0 = control network (eno12399, 130.127.x.x, 25Gbps) -- DO NOT USE for RDMA
+#   mlx5_2 = experiment network (ens3f0/ens1f0, 10.10.1.x, 100Gbps) -- USE THIS
+# Using mlx5_0 violates CloudLab's acceptable use policy.
+# Use perl for reliable escaping of bracket characters in the sed pattern.
+perl -i -pe "s/deviceList\[i\]\)\[5\] == '0'/deviceList[i])[5] == '2'/" src/rdma/Resource.cpp
+# Verify patch applied -- abort immediately if not
+if grep -q "\[5\] == '0'" src/rdma/Resource.cpp; then
+    echo "ERROR: NIC patch FAILED -- Resource.cpp still selects mlx5_0 (control network, 25Gbps)"
+    echo "This would send RDMA traffic over the control network, violating CloudLab policy."
+    exit 1
 fi
+echo "Patched NIC selection: mlx5_0 -> mlx5_2 (experiment network, 100Gbps)" 
 
 # Write memcached config pointing to node 0
 echo "$MEMCACHED_SERVER_IP" > memcached.conf
@@ -237,6 +239,14 @@ make -j$(nproc)
 echo ""
 echo "====== Build complete! ======"
 echo ""
+
+# Post-build verification: confirm NIC patch and RDMA device
+echo "=== Post-build verification ==="
+echo "NIC selection in Resource.cpp (must be '2', NOT '0'):"
+grep "\[5\] ==" ~/Sherman-CS6204/src/rdma/Resource.cpp
+echo "RDMA GIDs for mlx5_2 (must show 10.10.1.x on gidIndex 3):"
+show_gids | grep "mlx5_2" | head -4
+echo "============================================"
 
 if [ "$NODE_ID" -eq 0 ]; then
     # Start memcached bound to experiment network IP
