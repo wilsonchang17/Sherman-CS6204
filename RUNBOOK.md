@@ -6,38 +6,32 @@
 - Experiment network interface: `ens3f0` (r6525) or `ens1f0` (c6525-100g)
 - Node 0 IP: `10.10.1.1`, Node 1 IP: `10.10.1.2`
 
-> **c6525-100g verified compatible (Utah cluster, Feb 2026):**
-> Despite different interface name (`ens1f0` vs `ens3f0`), the RDMA device layout is
-> identical to r6525: `mlx5_2` maps to the experiment network, `gidIndex=3` is correct.
-> **No changes to setup.sh are needed for c6525-100g.**
-
 ---
 
 ## CRITICAL: Control Network Warning
 
 CloudLab has TWO network interfaces per node:
 
-| Node type | Control NIC | mlx5 device | Experiment NIC | mlx5 device |
-|-----------|-------------|-------------|----------------|-------------|
-| r6525 | `eno12399` (`130.127.x.x`) | `mlx5_0` | `ens3f0` (`10.10.1.x`) | `mlx5_2` |
-| c6525-100g | `eno33` (`128.110.x.x`) | `mlx5_0` | `ens1f0` (`10.10.1.x`) | `mlx5_2` |
+| Node type | Control NIC | mlx5 device | IP | Experiment NIC | mlx5 device | IP |
+|-----------|-------------|-------------|----|----------------|-------------|-----|
+| r6525 | `eno12399` | `mlx5_0` | `130.127.x.x` | `ens3f0` | `mlx5_2` | `10.10.1.x` |
+| c6525-100g | `eno12399` | `mlx5_0` | `130.127.x.x` | `ens1f0` | `mlx5_2` | `10.10.1.x` |
 
-On both node types, the original Sherman code selects `mlx5_0` (control network) by default.
-`setup.sh` patches `src/rdma/Resource.cpp` to select `mlx5_2` (experiment network).
+**The original Sherman code selects `mlx5_0` (control network, 25Gbps) by default.**
+This is confirmed by `show_gids`: mlx5_0 maps to `eno12399` with IP `130.127.x.x`.
 
-**Verify before every benchmark run:**
+Using mlx5_0 for RDMA benchmark traffic violates CloudLab's acceptable use policy.
+**You MUST patch Resource.cpp to use mlx5_2 before running any benchmark.**
+
+Verify correct NIC is in use:
 ```bash
-# Should show mlx5_2 with 10.10.1.x, gidIndex=3
+# Must show mlx5_2 with 10.10.1.x before every run
 show_gids | grep "mlx5_2.*3"
 
-# Monitor during benchmark -- must show 0 packets
-# r6525:
+# Monitor control network during benchmark -- must show 0 packets
 sudo tcpdump -i eno12399 -n port 4791 -q
-# c6525-100g:
-sudo tcpdump -i eno33 -n port 4791 -q
 ```
 If tcpdump shows ANY packets on port 4791 during benchmark, stop immediately.
-CloudLab will send a warning email and may block your account.
 
 ---
 
@@ -52,7 +46,12 @@ sudo bash setup.sh 0   # node0
 sudo bash setup.sh 1   # node1
 ```
 
-Works unchanged on both r6525 and c6525-100g.
+### After OFED install, script exits and asks you to restart driver
+```bash
+sudo /etc/init.d/openibd restart
+# SSH may disconnect -- reconnect and re-run setup.sh
+sudo bash setup.sh 0   # or 1
+```
 
 ### What setup.sh does
 1. Install MLNX_OFED 4.9
@@ -64,17 +63,33 @@ Works unchanged on both r6525 and c6525-100g.
 7. Clone repo + apply patches:
    - `gidIndex=3` (RoCE v2)
    - `kLockChipMemSize=128KB` (actual NIC on-chip memory)
-   - **`mlx5_2` NIC selection** (experiment network, NOT control network)
 8. Fix file ownership (`chown`) to avoid permission errors
 9. Set hugepages=5120, memlock unlimited, build
 10. node0: disable systemd memcached, start memcached on `10.10.1.1`, initialize `serverNum`
 
-### After OFED install, script exits and asks you to restart driver
+---
+
+## MANDATORY: Patch NIC selection after setup (both nodes)
+
+**setup.sh does NOT patch Resource.cpp. You must do this manually.**
+
 ```bash
-sudo /etc/init.d/openibd restart
-# SSH may disconnect -- reconnect and re-run setup.sh
-sudo bash setup.sh 0   # or 1
+# Apply patch (both nodes)
+sed -i "s/deviceList\[i\])\[5\] == '0'/deviceList[i])[5] == '2'/" ~/Sherman-CS6204/src/rdma/Resource.cpp
+
+# Verify patch applied
+grep "\[5\] ==" ~/Sherman-CS6204/src/rdma/Resource.cpp
+# Expected output: if (ibv_get_device_name(deviceList[i])[5] == '2') {
+
+# Verify mlx5_2 maps to experiment network
+show_gids | grep "mlx5_2.*3"
+# Expected: mlx5_2  1  3  ...10.10.1.x...  v2  ens1f0
+
+# Rebuild
+cd ~/Sherman-CS6204/build && make -j$(nproc)
 ```
+
+**Do NOT run benchmark until grep shows `'2'` and show_gids shows 10.10.1.x on mlx5_2.**
 
 ---
 
@@ -82,21 +97,26 @@ sudo bash setup.sh 0   # or 1
 
 ### Step 1: Verify experiment network is up (both nodes)
 ```bash
-# r6525:
-ip addr show ens3f0
 # c6525-100g:
 ip addr show ens1f0
+# r6525:
+ip addr show ens3f0
 # Expected: inet 10.10.1.1/24 (node0) or 10.10.1.2/24 (node1)
 ```
 
 ### Step 2: Verify RDMA is on experiment network (both nodes)
 ```bash
 show_gids | grep "mlx5_2.*3"
-# r6525 expected:    mlx5_2  1  3  ...10.10.1.x...  v2  ens3f0
-# c6525-100g expected: mlx5_2  1  3  ...10.10.1.x...  v2  ens1f0
+# Expected: mlx5_2  1  3  ...10.10.1.x...  v2  ens1f0  (or ens3f0)
 ```
 
-### Step 3: Check memcached is running on experiment network (node0)
+### Step 3: Verify NIC patch is still in place (both nodes)
+```bash
+grep "\[5\] ==" ~/Sherman-CS6204/src/rdma/Resource.cpp
+# Expected: [5] == '2'   (NOT '0')
+```
+
+### Step 4: Check memcached is running on experiment network (node0)
 ```bash
 ss -tlnp | grep 11211
 # Expected: 10.10.1.1:11211  (NOT 0.0.0.0 or 127.0.0.1 only)
@@ -106,13 +126,13 @@ sudo systemctl stop memcached 2>/dev/null || true
 memcached -p 11211 -u nobody -l 10.10.1.1 -d
 ```
 
-### Step 4: Verify memcached reachable from both nodes
+### Step 5: Verify memcached reachable from both nodes
 ```bash
 echo "stats" | nc 10.10.1.1 11211 | head -3
 # Expected: STAT pid ...
 ```
 
-### Step 5: Flush memcached and reset serverNum (node0, before EVERY run)
+### Step 6: Flush memcached and reset serverNum (node0, before EVERY run)
 ```bash
 echo -e "flush_all\r\n" | nc 10.10.1.1 11211
 # Expected: OK
@@ -123,26 +143,20 @@ echo -e "set serverNum 0 0 1\r\n0\r" | nc 10.10.1.1 11211
 > QP info). On the next run, Sherman reads these stale QP keys during handshake and builds
 > QPs with wrong parameters -- QP never enters RTS state, causing "transport retry counter
 > exceeded" on node1. flush_all clears everything so the next run starts clean.
->
-> Why serverNum: Sherman uses memcached_increment on `serverNum` to assign node IDs (0 and 1).
-> Key must exist with value 0 before each run.
-> After a run, value becomes 2 -- must reset or nodes get wrong IDs.
 
-### Step 6: Start control network monitor (node0, second terminal)
+### Step 7: Start control network monitor (node0, second terminal)
 ```bash
-# r6525:
 sudo tcpdump -i eno12399 -n port 4791 -q
-# c6525-100g:
-sudo tcpdump -i eno33 -n port 4791 -q
-# Must show 0 packets during benchmark
+# Must show 0 packets during entire benchmark run
+# If you see packets, STOP immediately -- you are using the wrong NIC
 ```
 
-### Step 7: Run benchmark (both nodes at the same time)
+### Step 8: Run benchmark (both nodes at the same time)
 ```bash
 cd ~/Sherman-CS6204/build
 
 # node0 (save result):
-sudo bash -c 'ulimit -l unlimited && timeout 180 ./benchmark 2 <read_ratio> 22 2>&1' | tee ~/result_uniform_<read_ratio>.txt
+sudo bash -c 'ulimit -l unlimited && timeout 180 ./benchmark 2 <read_ratio> 22 2>&1' | tee ~/result_<workload>.txt
 
 # node1 (same time):
 sudo bash -c 'ulimit -l unlimited && timeout 180 ./benchmark 2 <read_ratio> 22 2>&1'
@@ -155,28 +169,27 @@ Warmup takes ~60-120 seconds, then throughput output begins.
 
 ## Workload Parameters
 
-| Command | Workload | Paper Figure |
-|---------|----------|-------------|
-| `./benchmark 2 0 22` | Write-only (uniform) | Figure 11(a) |
-| `./benchmark 2 50 22` | Write-intensive (uniform) | Figure 11(b) |
-| `./benchmark 2 95 22` | Read-intensive (uniform) | Figure 11(c) |
+| Command | zipfan in benchmark.cpp | Workload | Result file | Paper Figure |
+|---------|--------------------------|----------|-------------|--------------|
+| `./benchmark 2 0 22`  | 0    | Write-only (uniform)      | result_uniform_writeonly.txt      | Figure 11(a) |
+| `./benchmark 2 50 22` | 0    | Write-intensive (uniform) | result_uniform_writeintensive.txt | Figure 11(b) |
+| `./benchmark 2 95 22` | 0    | Read-intensive (uniform)  | result_uniform_readintensive.txt  | Figure 11(c) |
+| `./benchmark 2 0 22`  | 0.99 | Write-only (skewed)       | result_skewed_writeonly.txt       | Figure 10(a) |
+| `./benchmark 2 50 22` | 0.99 | Write-intensive (skewed)  | result_skewed_writeintensive.txt  | Figure 10(b) |
+| `./benchmark 2 95 22` | 0.99 | Read-intensive (skewed)   | result_skewed_readintensive.txt   | Figure 10(c) |
 
-For skewed workloads (Figure 10), change `zipfan = 0.99` in `test/benchmark.cpp` and rebuild.
-
-**Save results (node0):**
-```bash
-sudo bash -c 'ulimit -l unlimited && timeout 180 ./benchmark 2 0 22 2>&1' | tee ~/result_uniform_writeonly.txt
-```
+For skewed workloads: edit `test/benchmark.cpp`, change `zipfan = 0` to `zipfan = 0.99`, rebuild.
+For uniform: change back to `zipfan = 0`, rebuild.
 
 ---
 
-## Key Patches Applied by setup.sh
+## Key Patches
 
 | File | Change | Reason |
 |------|--------|--------|
-| `include/Rdma.h` | `gidIndex=1` -> `3` | RoCE v2 on CloudLab (r6525 and c6525-100g) |
+| `include/Rdma.h` | `gidIndex=1` -> `3` | RoCE v2, IPv4-mapped GID on CloudLab |
 | `include/Common.h` | `kLockChipMemSize=256*1024` -> `128*1024` | Actual NIC on-chip memory is 128KB |
-| `src/rdma/Resource.cpp` | NIC `[5]=='0'` -> `[5]=='2'` | Select mlx5_2 (experiment network) not mlx5_0 (control network) |
+| `src/rdma/Resource.cpp` | NIC `[5]=='0'` -> `[5]=='2'` | **MANUAL PATCH REQUIRED** -- select mlx5_2 (experiment network, 100Gbps) not mlx5_0 (control network, 25Gbps) |
 
 ---
 
@@ -190,16 +203,10 @@ sudo apt --fix-broken install -y
 ```
 
 ### benchmark hangs with "Couldn't incr value and get ID: NOT FOUND"
-`serverNum` key not initialized. Run Step 5 above.
+`serverNum` key not initialized. Run Step 6 above.
 
 ### "transport retry counter exceeded" on node1
-Root cause: stale memcached keys from a previous run. Sherman exchanges QP connection info
-via memcached; if old keys remain, node1 builds a QP using stale parameters and it never
-enters RTS state -- RDMA packets are never sent (kernel counters stay at 0).
-
-Fix: always run `flush_all` before every benchmark run (see Step 5).
-
-If it still fails, check node0 actually printed `I am server 0` before node1 started.
+Root cause: stale memcached keys from a previous run. Always run `flush_all` before every run (Step 6).
 
 ### Permission denied on make / sed
 ```bash
