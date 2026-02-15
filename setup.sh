@@ -1,12 +1,16 @@
 #!/bin/bash
-# Setup script for Sherman on CloudLab r6525 / r6615 (ConnectX-5/6, Ubuntu 20.04)
+# Setup script for Sherman on CloudLab r6525 / c6525-100g / r6615 (ConnectX-5/6, Ubuntu 20.04)
 # Usage:
 #   Node 0 (memory server + compute server): bash setup.sh 0
 #   Node 1 (compute server):                 bash setup.sh 1
 #
 # Run this on BOTH nodes.
-# Experiment network interface: ens3f0 (r6525) or ens1np0 (r6615)
+# Experiment network interface: ens3f0 (r6525) or ens1f0 (c6525-100g) or ens1np0 (r6615)
 # Node 0 IP: 10.10.1.1, Node 1 IP: 10.10.1.2
+#
+# NOTE: c6525-100g (Utah) verified compatible -- RDMA device layout is identical to r6525:
+#   mlx5_0/mlx5_1 = control network (eno33/eno34), mlx5_2 = experiment network (ens1f0).
+#   No changes needed; IFACE below is the only difference but setup.sh auto-detects it.
 
 set -e
 
@@ -21,8 +25,22 @@ OFED_DIR="MLNX_OFED_LINUX-${OFED_VERSION}-ubuntu20.04-x86_64"
 OFED_TGZ="${OFED_DIR}.tgz"
 OFED_URL="https://content.mellanox.com/ofed/MLNX_OFED-${OFED_VERSION}/${OFED_TGZ}"
 
-# Experiment network interface name (r6525 uses ens3f0, r6615 uses ens1np0)
-IFACE="ens3f0"
+# Experiment network interface name:
+#   r6525:      ens3f0
+#   c6525-100g: ens1f0   (mlx5_2, same RDMA layout as r6525 -- no other changes needed)
+#   r6615:      ens1np0
+# Auto-detect: pick whichever interface exists on this node type.
+if ip link show ens3f0 2>/dev/null | grep -q "ens3f0"; then
+    IFACE="ens3f0"
+elif ip link show ens1f0 2>/dev/null | grep -q "ens1f0"; then
+    IFACE="ens1f0"
+elif ip link show ens1np0 2>/dev/null | grep -q "ens1np0"; then
+    IFACE="ens1np0"
+else
+    echo "ERROR: Cannot detect experiment network interface. Set IFACE manually."
+    exit 1
+fi
+echo "Detected experiment network interface: $IFACE"
 
 echo "====== [$(hostname)] Starting setup for node $NODE_ID ======"
 
@@ -169,19 +187,20 @@ if grep -q "int gidIndex = 1," include/Rdma.h; then
     echo "Patched gidIndex to 3 in include/Rdma.h"
 fi
 
-# Patch kLockChipMemSize to 128KB (ConnectX-5/6 on r6525 has 128KB on-chip memory)
+# Patch kLockChipMemSize to 128KB (ConnectX-5/6 on r6525 and c6525-100g has 128KB on-chip memory)
 # Change from 256KB to 128KB to match actual NIC capability
 if grep -q "kLockChipMemSize = 256 \* 1024" include/Common.h; then
     sed -i 's/kLockChipMemSize = 256 \* 1024/kLockChipMemSize = 128 * 1024/' include/Common.h
     echo "Patched kLockChipMemSize to 128KB in include/Common.h"
 fi
 
-# CRITICAL: Patch NIC selection to use mlx5_2 (ens3f0, experiment network 10.10.1.x)
-# NOT mlx5_0 (eno12399, control network 130.127.x.x).
-# On r6525, mlx5_0 is the control network NIC -- using it sends all RDMA traffic
-# over CloudLab's shared control network, which violates CloudLab policy.
+# CRITICAL: Patch NIC selection to use mlx5_2 (experiment network 10.10.1.x)
+# NOT mlx5_0 (control network).
+# On both r6525 and c6525-100g, mlx5_0/mlx5_1 are control network NICs -- using them
+# sends all RDMA traffic over CloudLab's shared control network, violating policy.
+# mlx5_2 is the experiment network NIC on both node types (ens3f0 or ens1f0).
 # Original code selects device whose name has '0' at position 5 (mlx5_0).
-# We change it to '2' to select mlx5_2 (ens3f0, 10.10.1.x).
+# We change it to '2' to select mlx5_2 (experiment network).
 if grep -q "deviceList\[i\])\[5\] == '0'" src/rdma/Resource.cpp; then
     cp src/rdma/Resource.cpp /tmp/Resource.cpp.bak
     sed "s/deviceList\[i\])\[5\] == '0'/deviceList[i])[5] == '2'/" /tmp/Resource.cpp.bak > /tmp/Resource.cpp
