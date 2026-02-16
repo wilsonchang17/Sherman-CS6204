@@ -1,13 +1,13 @@
 # Sherman Experiment Runbook
 **Last updated: 2026-02-15**
-Paste this file at the start of a new conversation to resume.
+
 
 ---
 
 ## Project
 Reproduce Sherman (SIGMOD 2022) B+Tree RDMA experiments for CS6204 at Virginia Tech.
 GitHub: https://github.com/wilsonchang17/Sherman-CS6204
-Report: sherman_report_v3.docx (tables need updating after re-run on mlx5_2)
+
 
 ---
 
