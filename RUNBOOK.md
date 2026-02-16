@@ -1,43 +1,45 @@
 # Sherman Experiment Runbook
-
-## Hardware
-- 2x CloudLab nodes with Mellanox ConnectX-5/6 100Gb NIC
-- Preferred node types (in order): r6525 > c6525-100g > c6525-25g > d7615
-- Experiment network interface: `ens3f0` (r6525) or `ens1f0` (c6525-100g)
-- Node 0 IP: `10.10.1.1`, Node 1 IP: `10.10.1.2`
+**Last updated: 2026-02-15**
+Paste this file at the start of a new conversation to resume.
 
 ---
 
-## CRITICAL: Control Network Warning
+## Project
+Reproduce Sherman (SIGMOD 2022) B+Tree RDMA experiments for CS6204 at Virginia Tech.
+GitHub: https://github.com/wilsonchang17/Sherman-CS6204
+Report: sherman_report_v3.docx (tables need updating after re-run on mlx5_2)
 
-CloudLab has TWO network interfaces per node:
+---
 
-| Node type | Control NIC | mlx5 device | IP | Experiment NIC | mlx5 device | IP |
-|-----------|-------------|-------------|----|----------------|-------------|-----|
-| r6525 | `eno12399` | `mlx5_0` | `130.127.x.x` | `ens3f0` | `mlx5_2` | `10.10.1.x` |
-| c6525-100g | `eno12399` | `mlx5_0` | `130.127.x.x` | `ens1f0` | `mlx5_2` | `10.10.1.x` |
+## Hardware (c6525-100g, Clemson cluster)
+- 2x CloudLab c6525-100g nodes
+- node0: 10.10.1.1 (memory server + compute server)
+- node1: 10.10.1.2 (compute server)
+- On-chip memory: 128KB (paper claims 256KB)
 
-**The original Sherman code selects `mlx5_0` (control network, 25Gbps) by default.**
-This is confirmed by `show_gids`: mlx5_0 maps to `eno12399` with IP `130.127.x.x`.
+NIC layout (confirmed via show_gids):
 
-Using mlx5_0 for RDMA benchmark traffic violates CloudLab's acceptable use policy.
-**You MUST patch Resource.cpp to use mlx5_2 before running any benchmark.**
+| Device  | Interface | IP          | Speed   | Role                           |
+|---------|-----------|-------------|---------|--------------------------------|
+| mlx5_0  | eno12399  | 130.127.x.x | 25Gbps  | Control network -- DO NOT USE for RDMA |
+| mlx5_2  | ens1f0    | 10.10.1.x   | 100Gbps | Experiment network -- USE THIS |
 
-Verify correct NIC is in use:
-```bash
-# Must show mlx5_2 with 10.10.1.x before every run
-show_gids | grep "mlx5_2.*3"
+---
 
-# Monitor control network during benchmark -- must show 0 packets
-sudo tcpdump -i eno12399 -n port 4791 -q
-```
-If tcpdump shows ANY packets on port 4791 during benchmark, stop immediately.
+## Current Code State
+- gidIndex: 3 (RoCE v2, IPv4-mapped) in include/Rdma.h
+- kLockChipMemSize: 128*1024 in include/Common.h
+- NIC selection: must be [5]=='2' in src/rdma/Resource.cpp (setup.sh handles this)
+
+## IMPORTANT: Previous results collected on mlx5_0 (control network) -- need re-run
+All result_*.txt files so far used mlx5_0 (eno12399, 130.127.x.x, control network).
+This was confirmed by CloudLab support via switch traffic counters.
+Note: tcpdump cannot detect RDMA traffic (kernel bypass), so tcpdump showing 0 packets
+does NOT mean the control network was idle. Must re-run with mlx5_2 patch applied.
 
 ---
 
 ## First-Time Setup (new nodes)
-
-Run on both nodes (can run in parallel):
 
 ```bash
 wget https://raw.githubusercontent.com/wilsonchang17/Sherman-CS6204/main/setup.sh
@@ -46,50 +48,18 @@ sudo bash setup.sh 0   # node0
 sudo bash setup.sh 1   # node1
 ```
 
-### After OFED install, script exits and asks you to restart driver
+After OFED installs, script exits -- restart driver then re-run:
 ```bash
 sudo /etc/init.d/openibd restart
-# SSH may disconnect -- reconnect and re-run setup.sh
 sudo bash setup.sh 0   # or 1
 ```
 
-### What setup.sh does
-1. Install MLNX_OFED 4.9
-2. Fix apt conflict: force-remove `ibverbs-providers` + `python3-pyverbs`, hold them
-3. Install libibverbs (41mlnx1 from MLNX_LIBS, has `ibv_exp_*` API)
-4. Install system deps: cmake, memcached, libboost-all-dev, etc.
-5. Install CityHash from source
-6. Set experiment network IP on the experiment interface
-7. Clone repo + apply patches:
-   - `gidIndex=3` (RoCE v2)
-   - `kLockChipMemSize=128KB` (actual NIC on-chip memory)
-8. Fix file ownership (`chown`) to avoid permission errors
-9. Set hugepages=5120, memlock unlimited, build
-10. node0: disable systemd memcached, start memcached on `10.10.1.1`, initialize `serverNum`
+Setup does: MLNX_OFED 4.9, libibverbs (41mlnx1), deps, CityHash, network IP,
+patches (gidIndex=3, kLockChipMemSize=128KB, mlx5_2 NIC selection), hugepages, build.
 
----
-
-## MANDATORY: Patch NIC selection after setup (both nodes)
-
-**setup.sh does NOT patch Resource.cpp. You must do this manually.**
-
-```bash
-# Apply patch (both nodes)
-sed -i "s/deviceList\[i\])\[5\] == '0'/deviceList[i])[5] == '2'/" ~/Sherman-CS6204/src/rdma/Resource.cpp
-
-# Verify patch applied
-grep "\[5\] ==" ~/Sherman-CS6204/src/rdma/Resource.cpp
-# Expected output: if (ibv_get_device_name(deviceList[i])[5] == '2') {
-
-# Verify mlx5_2 maps to experiment network
-show_gids | grep "mlx5_2.*3"
-# Expected: mlx5_2  1  3  ...10.10.1.x...  v2  ens1f0
-
-# Rebuild
-cd ~/Sherman-CS6204/build && make -j$(nproc)
-```
-
-**Do NOT run benchmark until grep shows `'2'` and show_gids shows 10.10.1.x on mlx5_2.**
+At the end, setup prints verification -- confirm:
+- NIC selection shows [5] == '2'  (NOT '0')
+- show_gids shows mlx5_2 with 10.10.1.x on gidIndex 3
 
 ---
 
@@ -97,61 +67,63 @@ cd ~/Sherman-CS6204/build && make -j$(nproc)
 
 ### Step 1: Verify experiment network is up (both nodes)
 ```bash
-# c6525-100g:
 ip addr show ens1f0
-# r6525:
-ip addr show ens3f0
 # Expected: inet 10.10.1.1/24 (node0) or 10.10.1.2/24 (node1)
+# If missing: sudo ip link set ens1f0 up && sudo ip addr add 10.10.1.<N>/24 dev ens1f0
 ```
 
-### Step 2: Verify RDMA is on experiment network (both nodes)
+### Step 2: Verify RDMA on experiment network (both nodes)
 ```bash
 show_gids | grep "mlx5_2.*3"
-# Expected: mlx5_2  1  3  ...10.10.1.x...  v2  ens1f0  (or ens3f0)
-```
+# Expected: mlx5_2  1  3  ...10.10.1.x...  v2  ens1f0
 
-### Step 3: Verify NIC patch is still in place (both nodes)
-```bash
 grep "\[5\] ==" ~/Sherman-CS6204/src/rdma/Resource.cpp
 # Expected: [5] == '2'   (NOT '0')
 ```
 
-### Step 4: Check memcached is running on experiment network (node0)
+### Step 3: Check memcached on experiment network (node0)
 ```bash
 ss -tlnp | grep 11211
-# Expected: 10.10.1.1:11211  (NOT 0.0.0.0 or 127.0.0.1 only)
+# Expected: 10.10.1.1:11211
 
 # If not running:
 sudo systemctl stop memcached 2>/dev/null || true
 memcached -p 11211 -u nobody -l 10.10.1.1 -d
 ```
 
-### Step 5: Verify memcached reachable from both nodes
+### Step 4: Flush memcached and reset serverNum (node0, before EVERY run)
 ```bash
-echo "stats" | nc 10.10.1.1 11211 | head -3
-# Expected: STAT pid ...
+echo -e "flush_all\r\n" | nc 10.10.1.1 11211             # Expected: OK
+echo -e "set serverNum 0 0 1\r\n0\r" | nc 10.10.1.1 11211  # Expected: STORED
+```
+flush_all is mandatory: stale QP keys from previous runs cause "transport retry counter
+exceeded" on the next run. serverNum must start at 0 before each run.
+
+### Step 5: Verify traffic is on experiment network after benchmark starts
+
+Note: tcpdump CANNOT detect RDMA traffic -- RDMA uses kernel bypass (DPDK), so
+tcpdump always shows 0 packets regardless of which NIC is used. This was confirmed
+by CloudLab support. Use mlx5 port counters instead.
+
+Before starting benchmark, snapshot the counters on both NICs:
+```bash
+# Snapshot BEFORE benchmark (both nodes)
+cat /sys/class/infiniband/mlx5_0/ports/1/counters/port_xmit_data > /tmp/mlx5_0_before.txt
+cat /sys/class/infiniband/mlx5_2/ports/1/counters/port_xmit_data > /tmp/mlx5_2_before.txt
 ```
 
-### Step 6: Flush memcached and reset serverNum (node0, before EVERY run)
+After benchmark completes, check which NIC transmitted data:
 ```bash
-echo -e "flush_all\r\n" | nc 10.10.1.1 11211
-# Expected: OK
-echo -e "set serverNum 0 0 1\r\n0\r" | nc 10.10.1.1 11211
-# Expected: STORED  (then Ctrl+C)
+# Check AFTER benchmark (both nodes)
+echo "mlx5_0 (control, should be ~0):"
+echo "before: $(cat /tmp/mlx5_0_before.txt)  after: $(cat /sys/class/infiniband/mlx5_0/ports/1/counters/port_xmit_data)"
+echo "mlx5_2 (experiment, should be large):"
+echo "before: $(cat /tmp/mlx5_2_before.txt)  after: $(cat /sys/class/infiniband/mlx5_2/ports/1/counters/port_xmit_data)"
 ```
-> Why flush_all: After each run, memcached accumulates ~150 stale keys (sum-sum-*, barrier-*,
-> QP info). On the next run, Sherman reads these stale QP keys during handshake and builds
-> QPs with wrong parameters -- QP never enters RTS state, causing "transport retry counter
-> exceeded" on node1. flush_all clears everything so the next run starts clean.
+mlx5_2 counter should increase by billions of bytes. mlx5_0 should be near zero.
+If mlx5_0 increased significantly, the NIC patch was not applied correctly -- stop and fix.
 
-### Step 7: Start control network monitor (node0, second terminal)
-```bash
-sudo tcpdump -i eno12399 -n port 4791 -q
-# Must show 0 packets during entire benchmark run
-# If you see packets, STOP immediately -- you are using the wrong NIC
-```
-
-### Step 8: Run benchmark (both nodes at the same time)
+### Step 6: Run benchmark (both nodes at the same time)
 ```bash
 cd ~/Sherman-CS6204/build
 
@@ -161,69 +133,66 @@ sudo bash -c 'ulimit -l unlimited && timeout 180 ./benchmark 2 <read_ratio> 22 2
 # node1 (same time):
 sudo bash -c 'ulimit -l unlimited && timeout 180 ./benchmark 2 <read_ratio> 22 2>&1'
 ```
-
-node0 prints `I am server 0` first, then node1 connects (within a few seconds is fine).
-Warmup takes ~60-120 seconds, then throughput output begins.
+Warmup ~60-120s, then throughput output begins.
 
 ---
 
-## Workload Parameters
+## Workloads (all 6)
 
-| Command | zipfan in benchmark.cpp | Workload | Result file | Paper Figure |
-|---------|--------------------------|----------|-------------|--------------|
-| `./benchmark 2 0 22`  | 0    | Write-only (uniform)      | result_uniform_writeonly.txt      | Figure 11(a) |
-| `./benchmark 2 50 22` | 0    | Write-intensive (uniform) | result_uniform_writeintensive.txt | Figure 11(b) |
-| `./benchmark 2 95 22` | 0    | Read-intensive (uniform)  | result_uniform_readintensive.txt  | Figure 11(c) |
-| `./benchmark 2 0 22`  | 0.99 | Write-only (skewed)       | result_skewed_writeonly.txt       | Figure 10(a) |
-| `./benchmark 2 50 22` | 0.99 | Write-intensive (skewed)  | result_skewed_writeintensive.txt  | Figure 10(b) |
-| `./benchmark 2 95 22` | 0.99 | Read-intensive (skewed)   | result_skewed_readintensive.txt   | Figure 10(c) |
+| read_ratio | zipfan | Workload                  | Result file                       | Paper Fig    |
+|------------|--------|---------------------------|-----------------------------------|--------------|
+| 0          | 0      | Write-only (uniform)      | result_uniform_writeonly.txt      | Figure 11(a) |
+| 50         | 0      | Write-intensive (uniform) | result_uniform_writeintensive.txt | Figure 11(b) |
+| 95         | 0      | Read-intensive (uniform)  | result_uniform_readintensive.txt  | Figure 11(c) |
+| 0          | 0.99   | Write-only (skewed)       | result_skewed_writeonly.txt       | Figure 10(a) |
+| 50         | 0.99   | Write-intensive (skewed)  | result_skewed_writeintensive.txt  | Figure 10(b) |
+| 95         | 0.99   | Read-intensive (skewed)   | result_skewed_readintensive.txt   | Figure 10(c) |
 
-For skewed workloads: edit `test/benchmark.cpp`, change `zipfan = 0` to `zipfan = 0.99`, rebuild.
-For uniform: change back to `zipfan = 0`, rebuild.
+For skewed: edit test/benchmark.cpp, change zipfan = 0 to zipfan = 0.99, rebuild.
+For uniform: change back to zipfan = 0, rebuild.
+
+```bash
+cd ~/Sherman-CS6204/build && make -j$(nproc)
+```
 
 ---
 
-## Key Patches
+## Key Patches (applied by setup.sh)
 
 | File | Change | Reason |
 |------|--------|--------|
-| `include/Rdma.h` | `gidIndex=1` -> `3` | RoCE v2, IPv4-mapped GID on CloudLab |
-| `include/Common.h` | `kLockChipMemSize=256*1024` -> `128*1024` | Actual NIC on-chip memory is 128KB |
-| `src/rdma/Resource.cpp` | NIC `[5]=='0'` -> `[5]=='2'` | **MANUAL PATCH REQUIRED** -- select mlx5_2 (experiment network, 100Gbps) not mlx5_0 (control network, 25Gbps) |
+| include/Rdma.h | gidIndex=1 -> 3 | RoCE v2, IPv4-mapped GID |
+| include/Common.h | kLockChipMemSize=256*1024 -> 128*1024 | Actual NIC on-chip memory is 128KB |
+| src/rdma/Resource.cpp | [5]=='0' -> [5]=='2' | Select mlx5_2 (100Gbps experiment) not mlx5_0 (25Gbps control) |
 
 ---
 
-## Known Issues & Fixes
+## Troubleshooting
 
-### apt broken after OFED install
+**apt broken after OFED install**
 ```bash
 sudo dpkg --remove --force-depends ibverbs-providers python3-pyverbs
 sudo apt-mark hold ibverbs-providers python3-pyverbs
 sudo apt --fix-broken install -y
 ```
 
-### benchmark hangs with "Couldn't incr value and get ID: NOT FOUND"
-`serverNum` key not initialized. Run Step 6 above.
+**benchmark hangs: "Couldn't incr value and get ID: NOT FOUND"**
+serverNum not initialized. Run Step 4.
 
-### "transport retry counter exceeded" on node1
-Root cause: stale memcached keys from a previous run. Always run `flush_all` before every run (Step 6).
+**"transport retry counter exceeded" on node1**
+Stale memcached keys. Run flush_all in Step 4.
 
-### Permission denied on make / sed
-```bash
-sudo chown -R $USER ~/Sherman-CS6204/
-```
-
-### systemd memcached on 127.0.0.1
-```bash
-sudo systemctl stop memcached && sudo systemctl disable memcached
-```
-
-### hugepages gone after reboot
+**hugepages gone after reboot**
 ```bash
 sudo sysctl -w vm.nr_hugepages=5120
 ```
 
-### libibverbs warnings about missing drivers (cxgb4, vmw_pvrdma, etc.)
+**Permission denied on make**
+```bash
+sudo chown -R $USER ~/Sherman-CS6204/
+```
+
+**libibverbs warnings (cxgb4, vmw_pvrdma, etc.)**
 Harmless. Only mlx5 driver matters.
 
 ---
