@@ -1,13 +1,12 @@
 # Sherman Experiment Runbook
 **Last updated: 2026-02-15**
-
+Paste this file at the start of a new conversation to resume.
 
 ---
 
 ## Project
 Reproduce Sherman (SIGMOD 2022) B+Tree RDMA experiments for CS6204 at Virginia Tech.
 GitHub: https://github.com/wilsonchang17/Sherman-CS6204
-
 
 ---
 
@@ -101,9 +100,9 @@ exceeded" on the next run. serverNum must start at 0 before each run.
 
 ### Step 5: Verify traffic is on experiment network after benchmark starts
 
-Note: tcpdump CANNOT detect RDMA traffic -- RDMA uses kernel bypass (DPDK), so
-tcpdump always shows 0 packets regardless of which NIC is used. This was confirmed
-by CloudLab support. Use mlx5 port counters instead.
+Note: tcpdump CANNOT detect RDMA traffic -- RDMA (libibverbs) uses kernel bypass,
+so tcpdump always shows 0 packets regardless of which NIC is used. This was confirmed
+by CloudLab support via switch traffic counters. Use mlx5 port counters instead.
 
 Before starting benchmark, snapshot the counters on both NICs:
 ```bash
