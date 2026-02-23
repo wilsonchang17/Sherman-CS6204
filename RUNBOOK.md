@@ -128,13 +128,12 @@ If mlx5_0 increased significantly, the NIC patch was not applied correctly -- st
 cd ~/Sherman-CS6204/build
 
 # node0 (save result):
-mkdir -p ~/Sherman-CS6204/results
-sudo bash -c 'ulimit -l unlimited && timeout 180 ./benchmark 2 <read_ratio> 22 2>&1' | tee ~/Sherman-CS6204/results/result_<workload>.txt
+sudo bash -c 'ulimit -l unlimited && timeout 120 ./benchmark 2 <read_ratio> 22 2>&1' | tee ~/result_<workload>.txt
 
 # node1 (same time):
-sudo bash -c 'ulimit -l unlimited && timeout 180 ./benchmark 2 <read_ratio> 22 2>&1'
+sudo bash -c 'ulimit -l unlimited && timeout 120 ./benchmark 2 <read_ratio> 22 2>&1'
 ```
-Warmup ~60-120s, then throughput output begins.
+Warmup ~34s on r6525 (2 nodes), then throughput output begins. 120s total is sufficient.
 
 ---
 
@@ -142,12 +141,12 @@ Warmup ~60-120s, then throughput output begins.
 
 | read_ratio | zipfan | Workload                  | Result file                       | Paper Fig    |
 |------------|--------|---------------------------|-----------------------------------|--------------|
-| 0          | 0      | Write-only (uniform)      | results/result_uniform_writeonly.txt      | Figure 11(a) |
-| 50         | 0      | Write-intensive (uniform) | results/result_uniform_writeintensive.txt | Figure 11(b) |
-| 95         | 0      | Read-intensive (uniform)  | results/result_uniform_readintensive.txt  | Figure 11(c) |
-| 0          | 0.99   | Write-only (skewed)       | results/result_skewed_writeonly.txt       | Figure 10(a) |
-| 50         | 0.99   | Write-intensive (skewed)  | results/result_skewed_writeintensive.txt  | Figure 10(b) |
-| 95         | 0.99   | Read-intensive (skewed)   | results/result_skewed_readintensive.txt   | Figure 10(c) |
+| 0          | 0      | Write-only (uniform)      | result_uniform_writeonly.txt      | Figure 11(a) |
+| 50         | 0      | Write-intensive (uniform) | result_uniform_writeintensive.txt | Figure 11(b) |
+| 95         | 0      | Read-intensive (uniform)  | result_uniform_readintensive.txt  | Figure 11(c) |
+| 0          | 0.99   | Write-only (skewed)       | result_skewed_writeonly.txt       | Figure 10(a) |
+| 50         | 0.99   | Write-intensive (skewed)  | result_skewed_writeintensive.txt  | Figure 10(b) |
+| 95         | 0.99   | Read-intensive (skewed)   | result_skewed_readintensive.txt   | Figure 10(c) |
 
 For skewed: edit test/benchmark.cpp, change zipfan = 0 to zipfan = 0.99, rebuild.
 For uniform: change back to zipfan = 0, rebuild.
@@ -188,10 +187,11 @@ Stale memcached keys. Run flush_all in Step 4.
 sudo sysctl -w vm.nr_hugepages=5120
 ```
 
-**Permission denied on make**
+**Permission denied on make or sed -i**
 ```bash
 sudo chown -R $USER ~/Sherman-CS6204/
 ```
+This fixes both `make` and `sed -i` failures. `sed -i` needs to create a temp file in the same directory, which fails if the directory is owned by root (from a previous sudo run of setup.sh).
 
 **libibverbs warnings (cxgb4, vmw_pvrdma, etc.)**
 Harmless. Only mlx5 driver matters.
