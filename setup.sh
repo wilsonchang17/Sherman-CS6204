@@ -1,16 +1,21 @@
 #!/bin/bash
-# Setup script for Sherman on CloudLab r6525 / c6525-100g / r6615 (ConnectX-5/6, Ubuntu 20.04)
+# Setup script for Sherman on CloudLab (ConnectX-5/6, Ubuntu 20.04)
+# Supported node types:
+#   r6525      -- experiment iface: ens3f0   (mlx5_2, 100Gbps)
+#   c6525-100g -- experiment iface: ens1f0   (mlx5_2, 100Gbps)
+#   r6615      -- experiment iface: ens1np0  (mlx5_2, 100Gbps)
+#   d6515      -- experiment iface: ens1f0np0 (mlx5_2, 100Gbps; Broadcom ens3f0/ens3f1 are 25G, DO NOT USE)
+#
 # Usage:
 #   Node 0 (memory server + compute server): bash setup.sh 0
 #   Node 1 (compute server):                 bash setup.sh 1
 #
 # Run this on BOTH nodes.
-# Experiment network interface: ens3f0 (r6525) or ens1f0 (c6525-100g) or ens1np0 (r6615)
 # Node 0 IP: 10.10.1.1, Node 1 IP: 10.10.1.2
 #
-# NOTE: c6525-100g (Utah) verified compatible -- RDMA device layout is identical to r6525:
-#   mlx5_0/mlx5_1 = control network (eno33/eno34), mlx5_2 = experiment network (ens1f0).
-#   No changes needed; IFACE below is the only difference but setup.sh auto-detects it.
+# RDMA device layout (same across all supported node types):
+#   mlx5_0/mlx5_1 = control network -- DO NOT USE for RDMA (violates CloudLab AUP)
+#   mlx5_2        = experiment network (10.10.1.x, 100Gbps) -- USE THIS
 
 set -e
 
@@ -25,16 +30,25 @@ OFED_DIR="MLNX_OFED_LINUX-${OFED_VERSION}-ubuntu20.04-x86_64"
 OFED_TGZ="${OFED_DIR}.tgz"
 OFED_URL="https://content.mellanox.com/ofed/MLNX_OFED-${OFED_VERSION}/${OFED_TGZ}"
 
-# Experiment network interface name:
+# Experiment network interface name (auto-detected by node type):
 #   r6525:      ens3f0
-#   c6525-100g: ens1f0   (mlx5_2, same RDMA layout as r6525 -- no other changes needed)
+#   c6525-100g: ens1f0
 #   r6615:      ens1np0
+#   d6515:      ens1f0np0  (100G Mellanox; ens3f0/ens3f1 are 25G Broadcom -- DO NOT USE)
 # Auto-detect: pick whichever interface exists on this node type.
-if ip link show ens3f0 2>/dev/null | grep -q "ens3f0"; then
+if ip link show ens3f0 2>/dev/null | grep -q "ens3f0" && \
+   ! ip link show ens1f0np0 2>/dev/null | grep -q "ens1f0np0"; then
+    # r6525: has ens3f0 and does NOT have ens1f0np0
+    # (d6515 also has ens3f0 but it's Broadcom 25G -- excluded by the second condition)
     IFACE="ens3f0"
+elif ip link show ens1f0np0 2>/dev/null | grep -q "ens1f0np0"; then
+    # d6515: Mellanox 100G port is ens1f0np0
+    IFACE="ens1f0np0"
 elif ip link show ens1f0 2>/dev/null | grep -q "ens1f0"; then
+    # c6525-100g
     IFACE="ens1f0"
 elif ip link show ens1np0 2>/dev/null | grep -q "ens1np0"; then
+    # r6615
     IFACE="ens1np0"
 else
     echo "ERROR: Cannot detect experiment network interface. Set IFACE manually."
@@ -196,9 +210,9 @@ fi
 
 # CRITICAL: Patch NIC selection to use mlx5_2 (experiment network 10.10.1.x)
 # NOT mlx5_0 (control network).
-# On both r6525 and c6525-100g:
-#   mlx5_0 = control network (eno12399, 130.127.x.x, 25Gbps) -- DO NOT USE for RDMA
-#   mlx5_2 = experiment network (ens3f0/ens1f0, 10.10.1.x, 100Gbps) -- USE THIS
+# On all supported node types (r6525, c6525-100g, r6615, d6515):
+#   mlx5_0 = control network -- DO NOT USE for RDMA (violates CloudLab AUP)
+#   mlx5_2 = experiment network (10.10.1.x, 100Gbps) -- USE THIS
 # Using mlx5_0 violates CloudLab's acceptable use policy.
 # Use perl for reliable escaping of bracket characters in the sed pattern.
 perl -i -pe "s/deviceList\[i\]\)\[5\] == '0'/deviceList[i])[5] == '2'/" src/rdma/Resource.cpp
