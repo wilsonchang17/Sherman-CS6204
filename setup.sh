@@ -201,12 +201,45 @@ if grep -q "int gidIndex = 1," include/Rdma.h; then
     echo "Patched gidIndex to 3 in include/Rdma.h"
 fi
 
-# Patch kLockChipMemSize to 128KB (ConnectX-5/6 on r6525 and c6525-100g has 128KB on-chip memory)
-# Change from 256KB to 128KB to match actual NIC capability
-if grep -q "kLockChipMemSize = 256 \* 1024" include/Common.h; then
-    sed -i 's/kLockChipMemSize = 256 \* 1024/kLockChipMemSize = 128 * 1024/' include/Common.h
-    echo "Patched kLockChipMemSize to 128KB in include/Common.h"
+# Detect actual allocatable on-chip memory size via mlx5_2.
+# Do NOT hardcode: different node types (r6525=128KB, c6525-100g=64KB) have different limits.
+# Compile a small probe, fall back to 128KB if detection fails.
+echo "Detecting NIC on-chip memory size via mlx5_2..."
+cat << 'DMTEST' > /tmp/test_dm.c
+#include <stdio.h>
+#include <string.h>
+#include <infiniband/verbs_exp.h>
+int main() {
+    int n;
+    struct ibv_device **list = ibv_get_device_list(&n);
+    struct ibv_context *ctx = NULL;
+    for (int i = 0; i < n; i++) {
+        if (strcmp(ibv_get_device_name(list[i]), "mlx5_2") == 0) {
+            ctx = ibv_open_device(list[i]); break;
+        }
+    }
+    if (!ctx) { printf("0\n"); return 1; }
+    size_t sizes[] = {128*1024, 64*1024, 32*1024, 16*1024, 0};
+    for (int i = 0; sizes[i]; i++) {
+        struct ibv_exp_alloc_dm_attr attr = { .length = sizes[i] };
+        struct ibv_exp_dm *dm = ibv_exp_alloc_dm(ctx, &attr);
+        if (dm) { ibv_exp_free_dm(dm); printf("%zu\n", sizes[i]); return 0; }
+    }
+    printf("0\n"); return 1;
+}
+DMTEST
+gcc /tmp/test_dm.c -o /tmp/test_dm -libverbs 2>/dev/null
+DM_SIZE=$(/tmp/test_dm 2>/dev/null || echo "0")
+if [ "$DM_SIZE" -eq 0 ]; then
+    echo "WARNING: on-chip memory detection failed, falling back to 128KB"
+    DM_SIZE=131072
 fi
+DM_KB=$((DM_SIZE / 1024))
+echo "Detected max allocatable device memory: ${DM_KB}KB"
+
+# Patch kLockChipMemSize to detected value (replace any existing value)
+perl -i -pe "s/kLockChipMemSize = \d+ \* 1024/kLockChipMemSize = ${DM_KB} * 1024/" include/Common.h
+echo "Patched kLockChipMemSize to ${DM_KB}KB in include/Common.h"
 
 # CRITICAL: Patch NIC selection to use mlx5_2 (experiment network 10.10.1.x)
 # NOT mlx5_0 (control network).
