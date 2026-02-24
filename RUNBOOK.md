@@ -1,5 +1,5 @@
 # Sherman Experiment Runbook
-**Last updated: 2026-02-23**
+**Last updated: 2026-02-15**
 Paste this file at the start of a new conversation to resume.
 
 ---
@@ -7,37 +7,22 @@ Paste this file at the start of a new conversation to resume.
 ## Project
 Reproduce Sherman (SIGMOD 2022) B+Tree RDMA experiments for CS6204 at Virginia Tech.
 GitHub: https://github.com/wilsonchang17/Sherman-CS6204
-Report: sherman_report_v6.docx (results pending -- d6515 benchmark run in progress)
+Report: sherman_report_v3.docx (tables need updating after re-run on mlx5_2)
 
 ---
 
-## Hardware (d6515, Utah cluster) -- CURRENT
-
-- 2x CloudLab d6515 nodes
+## Hardware (c6525-100g, Clemson cluster)
+- 2x CloudLab c6525-100g nodes
 - node0: 10.10.1.1 (memory server + compute server)
 - node1: 10.10.1.2 (compute server)
-- CPU: AMD EPYC 7452, 32 cores @ 2.35GHz
-- RAM: 128GB ECC per node
 - On-chip memory: 128KB (paper claims 256KB)
 
-NIC layout (confirmed via ibdev2netdev / show_gids after OFED install):
+NIC layout (confirmed via show_gids):
 
-| Device  | Interface   | IP          | Speed   | Role                                    |
-|---------|-------------|-------------|---------|------------------------------------------|
-| mlx5_0  | ens1f1np1   | 130.x.x.x   | 100Gbps | Control network -- DO NOT USE for RDMA  |
-| mlx5_2  | ens1f0np0   | 10.10.1.x   | 100Gbps | Experiment network -- USE THIS          |
-| (none)  | ens3f0/f1   | --          | 25Gbps  | Broadcom NIC -- not RDMA-capable        |
-
-**IMPORTANT:** After OFED install, run `ibdev2netdev` and `show_gids | grep mlx5_2` to confirm the above mapping. The mlx5 device numbers and interface names above are expected based on node spec but must be verified on first boot.
-
-### Other supported node types (for reference)
-
-| Node type   | Cluster  | Experiment interface | Verified |
-|-------------|----------|----------------------|----------|
-| c6525-100g  | Utah     | ens1f0               | Yes      |
-| r6525       | Clemson  | ens3f0               | Yes      |
-| r6615       | Clemson  | ens1np0              | Yes      |
-| d6515       | Utah     | ens1f0np0            | Pending  |
+| Device  | Interface | IP          | Speed   | Role                           |
+|---------|-----------|-------------|---------|--------------------------------|
+| mlx5_0  | eno12399  | 130.127.x.x | 25Gbps  | Control network -- DO NOT USE for RDMA |
+| mlx5_2  | ens1f0    | 10.10.1.x   | 100Gbps | Experiment network -- USE THIS |
 
 ---
 
@@ -45,6 +30,12 @@ NIC layout (confirmed via ibdev2netdev / show_gids after OFED install):
 - gidIndex: 3 (RoCE v2, IPv4-mapped) in include/Rdma.h
 - kLockChipMemSize: 128*1024 in include/Common.h
 - NIC selection: must be [5]=='2' in src/rdma/Resource.cpp (setup.sh handles this)
+
+## IMPORTANT: Previous results collected on mlx5_0 (control network) -- need re-run
+All result_*.txt files so far used mlx5_0 (eno12399, 130.127.x.x, control network).
+This was confirmed by CloudLab support via switch traffic counters.
+Note: tcpdump cannot detect RDMA traffic (kernel bypass), so tcpdump showing 0 packets
+does NOT mean the control network was idle. Must re-run with mlx5_2 patch applied.
 
 ---
 
@@ -76,16 +67,15 @@ At the end, setup prints verification -- confirm:
 
 ### Step 1: Verify experiment network is up (both nodes)
 ```bash
-ip addr show ens1f0np0
+ip addr show ens1f0
 # Expected: inet 10.10.1.1/24 (node0) or 10.10.1.2/24 (node1)
-# If missing:
-sudo ip link set ens1f0np0 up && sudo ip addr add 10.10.1.<N>/24 dev ens1f0np0
+# If missing: sudo ip link set ens1f0 up && sudo ip addr add 10.10.1.<N>/24 dev ens1f0
 ```
 
 ### Step 2: Verify RDMA on experiment network (both nodes)
 ```bash
 show_gids | grep "mlx5_2.*3"
-# Expected: mlx5_2  1  3  ...10.10.1.x...  v2  ens1f0np0
+# Expected: mlx5_2  1  3  ...10.10.1.x...  v2  ens1f0
 
 grep "\[5\] ==" ~/Sherman-CS6204/src/rdma/Resource.cpp
 # Expected: [5] == '2'   (NOT '0')
@@ -143,7 +133,7 @@ sudo bash -c 'ulimit -l unlimited && timeout 120 ./benchmark 2 <read_ratio> 22 2
 # node1 (same time):
 sudo bash -c 'ulimit -l unlimited && timeout 120 ./benchmark 2 <read_ratio> 22 2>&1'
 ```
-Warmup ~17-35s on 2 nodes, then throughput output begins. 120s total is sufficient.
+Warmup ~34s on r6525 (2 nodes), then throughput output begins. 120s total is sufficient.
 
 ---
 
