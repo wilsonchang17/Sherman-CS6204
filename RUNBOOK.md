@@ -162,12 +162,12 @@ If mlx5_0 increased significantly, the NIC patch was not applied correctly -- st
 cd ~/Sherman-CS6204/build
 
 # node0 (save result):
-sudo bash -c 'ulimit -l unlimited && timeout 120 ./benchmark 2 <read_ratio> 22 2>&1' | tee ~/result_<workload>.txt
+sudo bash -c 'ulimit -l unlimited && timeout 150 ./benchmark 2 <read_ratio> 22 2>&1' | tee ~/result_<workload>.txt
 
 # node1 (same time):
-sudo bash -c 'ulimit -l unlimited && timeout 120 ./benchmark 2 <read_ratio> 22 2>&1'
+sudo bash -c 'ulimit -l unlimited && timeout 150 ./benchmark 2 <read_ratio> 22 2>&1'
 ```
-Warmup ~34s on r6525 (2 nodes), then throughput output begins. 120s total is sufficient.
+Warmup ~34s on r6525 (2 nodes), then throughput output begins. 150s total is sufficient.
 
 ---
 
