@@ -1,5 +1,5 @@
 # Sherman Experiment Runbook
-**Last updated: 2026-02-15**
+**Last updated: 2026-02-23**
 Paste this file at the start of a new conversation to resume.
 
 ---
@@ -7,15 +7,49 @@ Paste this file at the start of a new conversation to resume.
 ## Project
 Reproduce Sherman (SIGMOD 2022) B+Tree RDMA experiments for CS6204 at Virginia Tech.
 GitHub: https://github.com/wilsonchang17/Sherman-CS6204
-Report: sherman_report_v3.docx (tables need updating after re-run on mlx5_2)
+Report: sherman_report_v4.docx
 
 ---
 
-## Hardware (c6525-100g, Clemson cluster)
-- 2x CloudLab c6525-100g nodes
+## Hardware
+
+Both node types below have identical RDMA device layout (mlx5_2 = experiment network).
+setup.sh auto-detects the correct interface and works on both without modification.
+
+### r6525 (Clemson cluster) -- used for final benchmark runs
+- 2x CloudLab r6525 nodes
 - node0: 10.10.1.1 (memory server + compute server)
 - node1: 10.10.1.2 (compute server)
 - On-chip memory: 128KB (paper claims 256KB)
+
+| Component | Specification |
+|-----------|---------------|
+| CPU       | 2x AMD EPYC 7xx2 (Rome), 24 cores total |
+| RAM       | 128GB ECC DDR4 |
+| OS        | Ubuntu 20.04, MLNX_OFED 4.9-4.1.7.0 |
+| NIC (control) | Dual-port Mellanox ConnectX-5 25GbE (mlx5_0/mlx5_1, eno12399/eno12409) |
+| NIC (experiment) | Dual-port Mellanox ConnectX-5 Ex 100GbE (mlx5_2/mlx5_3, ens3f0/ens3f1) |
+
+NIC layout (confirmed via show_gids):
+
+| Device  | Interface | IP          | Speed   | Role                           |
+|---------|-----------|-------------|---------|--------------------------------|
+| mlx5_0  | eno12399  | 130.127.x.x | 25Gbps  | Control network -- DO NOT USE for RDMA |
+| mlx5_2  | ens3f0    | 10.10.1.x   | 100Gbps | Experiment network -- USE THIS |
+
+### c6525-100g (Utah cluster) -- previously used, also compatible
+- 2x CloudLab c6525-100g nodes
+- Same IP assignment, same RDMA layout as r6525
+- Only difference: experiment interface is ens1f0 instead of ens3f0
+
+| Component | Specification |
+|-----------|---------------|
+| CPU       | 24-core AMD EPYC 7402P at 2.80GHz |
+| RAM       | 128GB ECC Memory (8x 16GB 3200MT/s RDIMMs) |
+| Disk      | Two 1.6TB NVMe SSD (PCIe v4.0) |
+| OS        | Ubuntu 20.04, MLNX_OFED 4.9-4.1.7.0 |
+| NIC (control) | Dual-port Mellanox ConnectX-5 25GbE (mlx5_0/mlx5_1, eno12399) |
+| NIC (experiment) | Dual-port Mellanox ConnectX-5 Ex 100GbE (mlx5_2, ens1f0) |
 
 NIC layout (confirmed via show_gids):
 
