@@ -1,5 +1,5 @@
 # Sherman Experiment Runbook
-**Last updated: 2026-02-23**
+**Last updated: 2026-03-20**
 Paste this file at the start of a new conversation to resume.
 
 ---
@@ -7,7 +7,7 @@ Paste this file at the start of a new conversation to resume.
 ## Project
 Reproduce Sherman (SIGMOD 2022) B+Tree RDMA experiments for CS6204 at Virginia Tech.
 GitHub: https://github.com/wilsonchang17/Sherman-CS6204
-Report: sherman_report_v4.docx
+Report: sherman_report.docx
 
 ---
 
@@ -16,31 +16,11 @@ Report: sherman_report_v4.docx
 Both node types below have identical RDMA device layout (mlx5_2 = experiment network).
 setup.sh auto-detects the correct interface and works on both without modification.
 
-### r6525 (Clemson cluster) -- used for final benchmark runs
-- 2x CloudLab r6525 nodes
+### c6525-100g (Utah cluster) -- used for final benchmark runs
+- 2x CloudLab c6525-100g nodes
 - node0: 10.10.1.1 (memory server + compute server)
 - node1: 10.10.1.2 (compute server)
-- On-chip memory: 128KB (paper claims 256KB)
-
-| Component | Specification |
-|-----------|---------------|
-| CPU       | 2x AMD EPYC 7xx2 (Rome), 24 cores total |
-| RAM       | 128GB ECC DDR4 |
-| OS        | Ubuntu 20.04, MLNX_OFED 4.9-4.1.7.0 |
-| NIC (control) | Dual-port Mellanox ConnectX-5 25GbE (mlx5_0/mlx5_1, eno12399/eno12409) |
-| NIC (experiment) | Dual-port Mellanox ConnectX-5 Ex 100GbE (mlx5_2/mlx5_3, ens3f0/ens3f1) |
-
-NIC layout (confirmed via show_gids):
-
-| Device  | Interface | IP          | Speed   | Role                           |
-|---------|-----------|-------------|---------|--------------------------------|
-| mlx5_0  | eno12399  | 130.127.x.x | 25Gbps  | Control network -- DO NOT USE for RDMA |
-| mlx5_2  | ens3f0    | 10.10.1.x   | 100Gbps | Experiment network -- USE THIS |
-
-### c6525-100g (Utah cluster) -- previously used, also compatible
-- 2x CloudLab c6525-100g nodes
-- Same IP assignment, same RDMA layout as r6525
-- Only difference: experiment interface is ens1f0 instead of ens3f0
+- On-chip memory: 64KB (confirmed by ibv_exp_alloc_dm probe; paper claims 256KB)
 
 | Component | Specification |
 |-----------|---------------|
@@ -58,18 +38,60 @@ NIC layout (confirmed via show_gids):
 | mlx5_0  | eno12399  | 130.127.x.x | 25Gbps  | Control network -- DO NOT USE for RDMA |
 | mlx5_2  | ens1f0    | 10.10.1.x   | 100Gbps | Experiment network -- USE THIS |
 
+### r6525 (Clemson cluster) -- also compatible
+- 2x CloudLab r6525 nodes
+- Same IP assignment, same RDMA layout as c6525-100g
+- Only difference: experiment interface is ens3f0 instead of ens1f0
+- On-chip memory: 128KB (confirmed by ibv_exp_alloc_dm probe)
+
+| Component | Specification |
+|-----------|---------------|
+| CPU       | 2x AMD EPYC 7xx2 (Rome), 24 cores total |
+| RAM       | 128GB ECC DDR4 |
+| OS        | Ubuntu 20.04, MLNX_OFED 4.9-4.1.7.0 |
+| NIC (control) | Dual-port Mellanox ConnectX-5 25GbE (mlx5_0/mlx5_1, eno12399/eno12409) |
+| NIC (experiment) | Dual-port Mellanox ConnectX-5 Ex 100GbE (mlx5_2/mlx5_3, ens3f0/ens3f1) |
+
+NIC layout (confirmed via show_gids):
+
+| Device  | Interface | IP          | Speed   | Role                           |
+|---------|-----------|-------------|---------|--------------------------------|
+| mlx5_0  | eno12399  | 130.127.x.x | 25Gbps  | Control network -- DO NOT USE for RDMA |
+| mlx5_2  | ens3f0    | 10.10.1.x   | 100Gbps | Experiment network -- USE THIS |
+
 ---
 
 ## Current Code State
 - gidIndex: 3 (RoCE v2, IPv4-mapped) in include/Rdma.h
-- kLockChipMemSize: 128*1024 in include/Common.h
+- kLockChipMemSize: auto-detected by ibv_exp_alloc_dm probe at setup time (64KB on c6525-100g, 128KB on r6525)
 - NIC selection: must be [5]=='2' in src/rdma/Resource.cpp (setup.sh handles this)
 
-## IMPORTANT: Previous results collected on mlx5_0 (control network) -- need re-run
-All result_*.txt files so far used mlx5_0 (eno12399, 130.127.x.x, control network).
-This was confirmed by CloudLab support via switch traffic counters.
-Note: tcpdump cannot detect RDMA traffic (kernel bypass), so tcpdump showing 0 packets
-does NOT mean the control network was idle. Must re-run with mlx5_2 patch applied.
+---
+
+## Final Benchmark Results (c6525-100g, mlx5_2, ens1f0, 100Gbps)
+
+Traffic verified: mlx5_2 transmitted ~40-70 GB per run; mlx5_0 showed zero traffic.
+
+### Uniform Workloads (zipfan=0, Figure 11)
+
+| Workload | Read Ratio | Our Throughput (Mops) | Paper (Mops) | Our p50 (us) | Paper p50 (us) | Our p99 (us) | Paper p99 (us) |
+|----------|------------|----------------------|--------------|--------------|----------------|--------------|----------------|
+| Write-only | 0% | 3.06 | 16.04 | 8.0 | 10.7 | 173 | 17.5 |
+| Write-intensive | 50% | 5.57 | 21.53 | 6.5 | 8.0 | 45 | 15 |
+| Read-intensive | 95% | 9.75 | 32.4 | 4.1 | 5.0 | 12.9 | 12.1 |
+
+### Skewed Workloads (zipfan=0.99, Figure 10)
+
+| Workload | Read Ratio | Our Throughput (Mops) | Paper (Mops) | Our p50 (us) | Paper p50 (us) | Our p99 (us) | Paper p99 (us) |
+|----------|------------|----------------------|--------------|--------------|----------------|--------------|----------------|
+| Write-only | 0% | 3.06 | 4.14 | 8.4 | 9.6 | 174 | 1136 |
+| Write-intensive | 50% | 5.57 | 8.02 | 6.5 | 6.9 | 44 | 209 |
+| Read-intensive | 95% | 9.77 | 33.8 | 4.0 | 4.8 | 12.9 | 47 |
+
+Key finding: Uniform and skewed results are nearly identical because the 64KB NIC on-chip
+memory yields only 8,192 lock entries (vs. paper's 131,072), causing lock table saturation
+under both workload distributions. This eliminates the skewed-workload advantage HOCL
+would otherwise provide.
 
 ---
 
@@ -89,7 +111,7 @@ sudo bash setup.sh 0   # or 1
 ```
 
 Setup does: MLNX_OFED 4.9, libibverbs (41mlnx1), deps, CityHash, network IP,
-patches (gidIndex=3, kLockChipMemSize=128KB, mlx5_2 NIC selection), hugepages, build.
+patches (gidIndex=3, kLockChipMemSize auto-detected, mlx5_2 NIC selection), hugepages, build.
 
 At the end, setup prints verification -- confirm:
 - NIC selection shows [5] == '2'  (NOT '0')
@@ -101,7 +123,7 @@ At the end, setup prints verification -- confirm:
 
 ### Step 1: Verify experiment network is up (both nodes)
 ```bash
-ip addr show ens1f0
+ip addr show ens1f0   # c6525-100g; use ens3f0 on r6525
 # Expected: inet 10.10.1.1/24 (node0) or 10.10.1.2/24 (node1)
 # If missing: sudo ip link set ens1f0 up && sudo ip addr add 10.10.1.<N>/24 dev ens1f0
 ```
@@ -167,14 +189,14 @@ sudo bash -c 'ulimit -l unlimited && timeout 150 ./benchmark 2 <read_ratio> 22 2
 # node1 (same time):
 sudo bash -c 'ulimit -l unlimited && timeout 150 ./benchmark 2 <read_ratio> 22 2>&1'
 ```
-Warmup ~34s on r6525 (2 nodes), then throughput output begins. 150s total is sufficient.
+Warmup ~13-14s on c6525-100g (2 nodes), then throughput output begins. 150s total is sufficient.
 
 ---
 
 ## Workloads (all 6)
 
 | read_ratio | zipfan | Workload                  | Result file                       | Paper Fig    |
-|------------|--------|---------------------------|-----------------------------------|--------------|
+|------------|--------|---------------------------|-----------------------------------|--------------| 
 | 0          | 0      | Write-only (uniform)      | result_uniform_writeonly.txt      | Figure 11(a) |
 | 50         | 0      | Write-intensive (uniform) | result_uniform_writeintensive.txt | Figure 11(b) |
 | 95         | 0      | Read-intensive (uniform)  | result_uniform_readintensive.txt  | Figure 11(c) |
@@ -196,7 +218,7 @@ cd ~/Sherman-CS6204/build && make -j$(nproc)
 | File | Change | Reason |
 |------|--------|--------|
 | include/Rdma.h | gidIndex=1 -> 3 | RoCE v2, IPv4-mapped GID |
-| include/Common.h | kLockChipMemSize=256*1024 -> 128*1024 | Actual NIC on-chip memory is 128KB |
+| include/Common.h | kLockChipMemSize=256*1024 -> auto-detected | Probe actual allocatable NIC on-chip memory (64KB on c6525-100g, 128KB on r6525) |
 | src/rdma/Resource.cpp | [5]=='0' -> [5]=='2' | Select mlx5_2 (100Gbps experiment) not mlx5_0 (25Gbps control) |
 
 ---
