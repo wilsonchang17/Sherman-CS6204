@@ -1,8 +1,9 @@
 #!/bin/bash
 # Setup script for Sherman on CloudLab (ConnectX-5/6, Ubuntu 20.04)
 # Supported node types:
-#   r6525      -- experiment iface: ens3f0   (mlx5_2, 100Gbps)
-#   c6525-100g -- experiment iface: ens1f0   (mlx5_2, 100Gbps)
+#   r650       -- experiment iface: ens2f0   (mlx5_2, 100Gbps ConnectX-6)
+#   r6525      -- experiment iface: ens3f0   (mlx5_2, 100Gbps ConnectX-6)
+#   c6525-100g -- experiment iface: ens1f0   (mlx5_2, 100Gbps ConnectX-5 Ex)
 #   r6615      -- experiment iface: ens1np0  (mlx5_2, 100Gbps)
 #   d6515      -- experiment iface: ens1f0np0 (mlx5_2, 100Gbps; Broadcom ens3f0/ens3f1 are 25G, DO NOT USE)
 #
@@ -31,12 +32,17 @@ OFED_TGZ="${OFED_DIR}.tgz"
 OFED_URL="https://content.mellanox.com/ofed/MLNX_OFED-${OFED_VERSION}/${OFED_TGZ}"
 
 # Experiment network interface name (auto-detected by node type):
-#   r6525:      ens3f0
-#   c6525-100g: ens1f0
-#   r6615:      ens1np0
-#   d6515:      ens1f0np0  (100G Mellanox; ens3f0/ens3f1 are 25G Broadcom -- DO NOT USE)
+#   r6525:      ens3f0   (mlx5_2, 100Gbps ConnectX-6)
+#   r650:       ens2f0   (mlx5_2, 100Gbps ConnectX-6; eno12399 is 25Gbps control -- DO NOT USE)
+#   c6525-100g: ens1f0   (mlx5_2, 100Gbps ConnectX-5 Ex)
+#   r6615:      ens1np0  (mlx5_2, 100Gbps)
+#   d6515:      ens1f0np0 (100G Mellanox; ens3f0/ens3f1 are 25G Broadcom -- DO NOT USE)
 # Auto-detect: pick whichever interface exists on this node type.
-if ip link show ens3f0 2>/dev/null | grep -q "ens3f0" && \
+if ip link show ens2f0 2>/dev/null | grep -q "ens2f0"; then
+    # r650: ConnectX-6 100G experiment port is ens2f0
+    # eno12399 (25G ConnectX-5) is the control network -- DO NOT USE
+    IFACE="ens2f0"
+elif ip link show ens3f0 2>/dev/null | grep -q "ens3f0" && \
    ! ip link show ens1f0np0 2>/dev/null | grep -q "ens1f0np0"; then
     # r6525: has ens3f0 and does NOT have ens1f0np0
     # (d6515 also has ens3f0 but it's Broadcom 25G -- excluded by the second condition)
@@ -150,7 +156,8 @@ sudo apt-get install -y \
     memcached libmemcached-dev \
     libboost-all-dev \
     infiniband-diags \
-    pciutils
+    pciutils \
+    numactl
 
 # -----------------------------------------------------------------------
 # Step 4: Install CityHash

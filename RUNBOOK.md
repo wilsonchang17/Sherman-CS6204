@@ -13,8 +13,8 @@ Report: sherman_report.docx (Part 1 complete), Part 2 in progress
 
 ## Hardware
 
-Both node types below have identical RDMA device layout (mlx5_2 = experiment network).
-setup.sh auto-detects the correct interface and works on both without modification.
+All node types below use mlx5_2 as the experiment network.
+setup.sh auto-detects the correct interface for r650, r6525, c6525-100g, r6615, and d6515.
 
 CRITICAL: mlx5_0 is ALWAYS the control network -- DO NOT USE for RDMA on any node type.
 Only mlx5_2 (experiment network, 10.10.1.x) is permitted for RDMA traffic.
@@ -42,6 +42,34 @@ NIC layout (confirmed via show_gids):
 |---------|-----------|-------------|---------|--------------------------------|
 | mlx5_0  | eno12399  | 130.127.x.x | 25Gbps  | Control network -- DO NOT USE for RDMA |
 | mlx5_2  | ens1f0    | 10.10.1.x   | 100Gbps | Experiment network -- USE THIS |
+
+### r650 -- used for Part 2 (CXL emulation, fallback when r6525 unavailable)
+- 2x CloudLab r650 nodes
+- node0: 10.10.1.1 (memory server + compute server)
+- node1: 10.10.1.2 (compute server)
+- On-chip memory: TBD (ibv_exp_alloc_dm probe will detect after OFED install)
+- CPU: dual-socket (2x 36-core Intel Xeon Platinum 8360Y) -- supports NUMA emulation
+- NUMA distance: 20 (remote) vs 10 (local), ratio 2.0x -- weaker CXL simulation than r6525 (3.2x)
+- Lock table: depends on detected on-chip memory size
+
+| Component | Specification |
+|-----------|---------------|
+| CPU       | 2x 36-core Intel Xeon Platinum 8360Y at 2.4GHz |
+| RAM       | 256GB ECC DDR4 (16x 16GB 3200MHz) |
+| Disk      | One 480GB SATA SSD + One 1.6TB NVMe SSD (PCIe v4.0) |
+| OS        | Ubuntu 20.04, MLNX_OFED 4.9-4.1.7.0 |
+| NIC (control) | Dual-port Mellanox ConnectX-5 25GbE (mlx5_0/mlx5_1, eno12399/eno12409) |
+| NIC (experiment) | Dual-port Mellanox ConnectX-6 100GbE (mlx5_2/mlx5_3, ens2f0/ens2f1) |
+
+NIC layout (confirmed via ip link + speed probe):
+
+| Device  | Interface | IP          | Speed   | Role                           |
+|---------|-----------|-------------|---------|--------------------------------|
+| mlx5_0  | eno12399  | 130.127.x.x | 25Gbps  | Control network -- DO NOT USE for RDMA |
+| mlx5_2  | ens2f0    | 10.10.1.x   | 100Gbps | Experiment network -- USE THIS |
+
+NOTE: NUMA interleaving on r650 is odd/even CPU assignment (node 0: 0,2,4,...; node 1: 1,3,5,...).
+This is Intel's topology style vs AMD's contiguous assignment on r6525. numactl behaviour is identical.
 
 ### r6525 (Clemson cluster) -- used for Part 2 (CXL emulation)
 - 2x CloudLab r6525 nodes
@@ -71,7 +99,7 @@ NIC layout (confirmed via show_gids):
 
 ## Current Code State
 - gidIndex: 3 (RoCE v2, IPv4-mapped) in include/Rdma.h
-- kLockChipMemSize: auto-detected by ibv_exp_alloc_dm probe at setup time (64KB on c6525-100g, 128KB on r6525)
+- kLockChipMemSize: auto-detected by ibv_exp_alloc_dm probe at setup time (64KB on c6525-100g, 128KB on r6525, r650 TBD)
 - NIC selection: must be [5]=='2' in src/rdma/Resource.cpp (setup.sh handles this)
 - Lock entry type: uint64_t (8 bytes), NOT 16-bit masked CAS as in the paper -- this is why
   our lock table has 16x fewer entries than the paper even at the same memory size
