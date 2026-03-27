@@ -1,0 +1,191 @@
+libibverbs: Warning: couldn't load driver 'mlx4': libmlx4-rdmav2.so: cannot open shared object file: No such file or directory
+kNodeCount 2, kReadRatio 0, kThreadCount 22
+[4mshared memory size: 8GB, 0x7fcf0ce00000[0m
+[4mcache size: 1GB[0m
+[4mnumber of servers (colocated MN/CN): 2[0m
+The RNIC has 128KB device memory
+I am server 0
+I connect server 1
+[4mnumber of threads on memory node: 1[0m
+[4mthread 0 in memory nodes runs...
+[0m
+Header size: 35
+Internal Page size: 1021 [1024]
+Internal per Page: 61
+Leaf Page size: 1017 [1024]
+Leaf per Page: 54
+LeafEntry size: 18
+InternalEntry size: 16
+Tree root pointer value [0, 33554432]
+new root level 1 [0, 33556480]
+new root level 2 [0, 33619968]
+new root level 3 [0, 36002816]
+I am thread 0 on compute nodes
+I am thread 2 on compute nodes
+I am thread 5 on compute nodes
+I am thread 6 on compute nodes
+I am thread 7 on compute nodes
+I am thread 1 on compute nodes
+I am thread 3 on compute nodes
+I am thread 4 on compute nodes
+I am thread 8 on compute nodes
+I am thread 20 on compute nodes
+I am thread 9 on compute nodes
+I am thread 21 on compute nodes
+I am thread 19 on compute nodes
+I am thread 15 on compute nodes
+I am thread 14 on compute nodes
+I am thread 16 on compute nodes
+I am thread 10 on compute nodes
+I am thread 18 on compute nodes
+I am thread 12 on compute nodes
+I am thread 13 on compute nodes
+I am thread 11 on compute nodes
+I am thread 17 on compute nodes
+new root level 4 [0, 102383616]
+node 0 finish
+warmup time 17s
+[skiplist node: 44896]  [page cache: 22459]
+170ns per loop
+0, throughput 1.7313
+cluster throughput 3.404
+cache hit rate: 0.992574
+0, throughput 1.7463
+cluster throughput 3.427
+cache hit rate: 0.994583
+p50 10.800000	p90 16.700000	p95 17.200000	p99 20.400000	p999 43.300000
+0, throughput 1.7477
+cluster throughput 3.431
+cache hit rate: 0.995339
+0, throughput 1.7492
+cluster throughput 3.434
+cache hit rate: 0.995807
+0, throughput 1.7499
+cluster throughput 3.436
+cache hit rate: 0.996132
+p50 10.700000	p90 16.700000	p95 17.100000	p99 20.000000	p999 42.600000
+0, throughput 1.7513
+cluster throughput 3.440
+cache hit rate: 0.996385
+0, throughput 1.7524
+cluster throughput 3.442
+cache hit rate: 0.996602
+0, throughput 1.7534
+cluster throughput 3.445
+cache hit rate: 0.996785
+p50 10.700000	p90 16.700000	p95 17.100000	p99 19.800000	p999 41.900000
+0, throughput 1.7547
+cluster throughput 3.447
+cache hit rate: 0.996954
+0, throughput 1.7545
+cluster throughput 3.448
+cache hit rate: 0.997102
+0, throughput 1.7556
+cluster throughput 3.449
+cache hit rate: 0.997235
+p50 10.700000	p90 16.700000	p95 17.100000	p99 19.700000	p999 41.200000
+0, throughput 1.7563
+cluster throughput 3.451
+cache hit rate: 0.997357
+0, throughput 1.7566
+cluster throughput 3.452
+cache hit rate: 0.997471
+0, throughput 1.7572
+cluster throughput 3.454
+cache hit rate: 0.997574
+p50 10.700000	p90 16.700000	p95 17.100000	p99 19.600000	p999 40.700000
+0, throughput 1.7584
+cluster throughput 3.456
+cache hit rate: 0.997672
+0, throughput 1.7584
+cluster throughput 3.456
+cache hit rate: 0.997764
+0, throughput 1.7574
+cluster throughput 3.455
+cache hit rate: 0.997850
+p50 10.700000	p90 16.700000	p95 17.100000	p99 19.500000	p999 40.200000
+0, throughput 1.7599
+cluster throughput 3.458
+cache hit rate: 0.997930
+0, throughput 1.7604
+cluster throughput 3.459
+cache hit rate: 0.998007
+0, throughput 1.7596
+cluster throughput 3.457
+cache hit rate: 0.998077
+p50 10.600000	p90 16.700000	p95 17.100000	p99 19.400000	p999 39.700000
+0, throughput 1.7607
+cluster throughput 3.460
+cache hit rate: 0.998143
+0, throughput 1.7606
+cluster throughput 3.459
+cache hit rate: 0.998206
+0, throughput 1.7609
+cluster throughput 3.462
+cache hit rate: 0.998265
+p50 10.600000	p90 16.700000	p95 17.100000	p99 19.300000	p999 38.900000
+0, throughput 1.7620
+cluster throughput 3.463
+cache hit rate: 0.998322
+0, throughput 1.7612
+cluster throughput 3.463
+cache hit rate: 0.998376
+0, throughput 1.7614
+cluster throughput 3.461
+cache hit rate: 0.998426
+p50 10.600000	p90 16.700000	p95 17.100000	p99 19.300000	p999 38.400000
+0, throughput 1.7616
+cluster throughput 3.462
+cache hit rate: 0.998473
+0, throughput 1.7620
+cluster throughput 3.463
+cache hit rate: 0.998519
+0, throughput 1.7617
+cluster throughput 3.463
+cache hit rate: 0.998562
+p50 10.600000	p90 16.700000	p95 17.100000	p99 19.200000	p999 37.800000
+0, throughput 1.7618
+cluster throughput 3.464
+cache hit rate: 0.998603
+0, throughput 1.7617
+cluster throughput 3.464
+cache hit rate: 0.998641
+0, throughput 1.7619
+cluster throughput 3.462
+cache hit rate: 0.998678
+p50 10.600000	p90 16.700000	p95 17.100000	p99 19.200000	p999 37.200000
+0, throughput 1.7619
+cluster throughput 3.464
+cache hit rate: 0.998714
+0, throughput 1.7615
+cluster throughput 3.463
+cache hit rate: 0.998748
+0, throughput 1.7621
+cluster throughput 3.465
+cache hit rate: 0.998780
+p50 10.600000	p90 16.700000	p95 17.100000	p99 19.200000	p999 36.400000
+0, throughput 1.7619
+cluster throughput 3.463
+cache hit rate: 0.998811
+0, throughput 1.7629
+cluster throughput 3.465
+cache hit rate: 0.998840
+0, throughput 1.7618
+cluster throughput 3.464
+cache hit rate: 0.998869
+p50 10.600000	p90 16.700000	p95 17.100000	p99 19.200000	p999 35.800000
+0, throughput 1.7626
+cluster throughput 3.465
+cache hit rate: 0.998896
+0, throughput 1.7624
+cluster throughput 3.465
+cache hit rate: 0.998922
+0, throughput 1.7628
+cluster throughput 3.465
+cache hit rate: 0.998946
+p50 10.600000	p90 16.700000	p95 17.100000	p99 19.100000	p999 35.300000
+0, throughput 1.7617
+cluster throughput 3.464
+cache hit rate: 0.998970
+0, throughput 1.7629
+cluster th
