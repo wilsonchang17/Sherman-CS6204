@@ -1,4 +1,11 @@
 build/
 build/*
 .vscode/
-
+.claude/
+.venv/
+tmp/docs/
+AGENTS
+AGENTS.md
+CLAUDE
+CLAUDE.md
+Chen-Wei Chang Project Part One.pdf
