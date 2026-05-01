@@ -123,8 +123,8 @@ Traffic verified: mlx5_2 transmitted ~40-70 GB per run; mlx5_0 showed zero traff
 | Workload | Read Ratio | Our Throughput (Mops) | Paper (Mops) | Our p50 (us) | Paper p50 (us) | Our p99 (us) | Paper p99 (us) |
 |----------|------------|----------------------|--------------|--------------|----------------|--------------|----------------|
 | Write-only | 0% | 3.06 | 4.14 | 8.4 | 9.6 | 174 | 1136 |
-| Write-intensive | 50% | 5.57 | 8.02 | 6.5 | 6.9 | 44 | 209 |
-| Read-intensive | 95% | 9.77 | 33.8 | 4.0 | 4.8 | 12.9 | 47 |
+| Write-intensive | 50% | 5.57 | 8.02 | 6.5 | 6.9 | 44 | 659 |
+| Read-intensive | 95% | 9.77 | 33.8 | 4.0 | 4.8 | 12.9 | 12.3 |
 
 Key findings from Part 1:
 
@@ -142,7 +142,9 @@ Key findings from Part 1:
    write-heavy lock contention.
 
 3. Lower absolute throughput (e.g. 3.06 vs 16.04 Mops write-only) is expected: we use
-   2 nodes / 44 threads vs the paper's 16 nodes / 176 threads (4x fewer threads).
+   2 physical nodes / 44 threads vs the paper's 8 physical servers / 176 threads.
+   The paper's 8 MSs and 8 CSs are logical roles, with one MS and one CS emulated
+   on each physical server.
 
 ---
 
