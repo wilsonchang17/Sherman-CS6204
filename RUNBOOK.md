@@ -1,13 +1,38 @@
 # Sherman Experiment Runbook
-**Last updated: 2026-03-26**
-Paste this file at the start of a new conversation to resume.
+**Last updated: 2026-05-02**
 
 ---
 
 ## Project
 Reproduce Sherman (SIGMOD 2022) B+Tree RDMA experiments for CS6204 at Virginia Tech.
 GitHub: https://github.com/wilsonchang17/Sherman-CS6204
-Report: sherman_report.docx (Part 1 complete), Part 2 in progress
+
+Final report artifact: `sherman_report.docx`
+
+Current status: report is complete. This runbook is now the reproducibility and handoff
+record for the finished report, not a live task list.
+
+---
+
+## Final Report State
+
+The final report uses these evidence groups:
+
+| Group | Platform | Purpose | Result directory |
+|-------|----------|---------|------------------|
+| Part 1 baseline | c6525-100g | Paper-style two-node baseline on the 100Gbps experiment NIC | `results/c6525_baseline/` |
+| Part 2 baseline | r650 | Dual-socket baseline before NUMA-based CXL emulation | `results/r650_baseline/` |
+| Part 2 CXL emulation | r650 | Remote-NUMA memory placement with the default large index-cache behavior | `results/r650_cxl/` |
+| Part 2 cache sensitivity | r650 | Same CXL-style setup with reduced Sherman index cache (`kIndexCacheSize = 4`) | `results/r650_cxl_cache4m/` |
+
+Important interpretation boundary:
+- The paper supports Sherman's CS-side index-cache design and reports high cache-hit behavior.
+- The near-`99.9%` cache-hit rates are this reproduction's own measurements, not a paper number.
+- The 4MB cache experiment was added to expose remote-DRAM latency more clearly; its hit rates
+  were still increasing within the 150s benchmark window, so treat it as a sensitivity result.
+
+Local DOCX backups and rendered previews may exist under `tmp/docs/`; the deliverable report is
+the root-level `sherman_report.docx`.
 
 ---
 
@@ -43,14 +68,14 @@ NIC layout (confirmed via show_gids):
 | mlx5_0  | eno12399  | 130.127.x.x | 25Gbps  | Control network -- DO NOT USE for RDMA |
 | mlx5_2  | ens1f0    | 10.10.1.x   | 100Gbps | Experiment network -- USE THIS |
 
-### r650 -- used for Part 2 (CXL emulation, fallback when r6525 unavailable)
+### r650 -- used for Part 2 (CXL emulation)
 - 2x CloudLab r650 nodes
 - node0: 10.10.1.1 (memory server + compute server)
 - node1: 10.10.1.2 (compute server)
-- On-chip memory: TBD (ibv_exp_alloc_dm probe will detect after OFED install)
+- On-chip memory: 128KB (confirmed in completed r650 runs)
 - CPU: dual-socket (2x 36-core Intel Xeon Platinum 8360Y) -- supports NUMA emulation
 - NUMA distance: 20 (remote) vs 10 (local), ratio 2.0x -- weaker CXL simulation than r6525 (3.2x)
-- Lock table: depends on detected on-chip memory size
+- Lock table: 128KB / 8B (uint64_t) = 16,384 entries
 
 | Component | Specification |
 |-----------|---------------|
@@ -71,7 +96,7 @@ NIC layout (confirmed via ip link + speed probe):
 NOTE: NUMA interleaving on r650 is odd/even CPU assignment (node 0: 0,2,4,...; node 1: 1,3,5,...).
 This is Intel's topology style vs AMD's contiguous assignment on r6525. numactl behaviour is identical.
 
-### r6525 (Clemson cluster) -- used for Part 2 (CXL emulation)
+### r6525 (Clemson cluster) -- planned but not used in the final report
 - 2x CloudLab r6525 nodes
 - node0: 10.10.1.1 (memory server + compute server)
 - node1: 10.10.1.2 (compute server)
@@ -99,10 +124,22 @@ NIC layout (confirmed via show_gids):
 
 ## Current Code State
 - gidIndex: 3 (RoCE v2, IPv4-mapped) in include/Rdma.h
-- kLockChipMemSize: auto-detected by ibv_exp_alloc_dm probe at setup time (64KB on c6525-100g, 128KB on r6525, r650 TBD)
+- kLockChipMemSize: 128KB in the final checked-in source state for r650
+- kIndexCacheSize: 4MB in the final checked-in source state for the cache-sensitivity run
+- zipfan: 0.99 in the final checked-in source state for skewed workloads
 - NIC selection: must be [5]=='2' in src/rdma/Resource.cpp (setup.sh handles this)
 - Lock entry type: uint64_t (8 bytes), NOT 16-bit masked CAS as in the paper -- this is why
   our lock table has 16x fewer entries than the paper even at the same memory size
+
+To re-run earlier/default-cache results, explicitly set:
+- `include/Common.h`: `constexpr int kIndexCacheSize = 1000;`
+- `test/benchmark.cpp`: `double zipfan = 0;` for uniform or `0.99` for skewed
+- Rebuild with `cd build && make -j$(nproc)`
+
+To re-run the final cache-sensitivity experiment, set:
+- `include/Common.h`: `constexpr int kIndexCacheSize = 4;`
+- `test/benchmark.cpp`: `double zipfan = 0;` for uniform or `0.99` for skewed
+- Rebuild with `cd build && make -j$(nproc)`
 
 ---
 
@@ -176,15 +213,17 @@ At the end, setup prints verification -- confirm:
 
 ### Step 1: Verify experiment network is up (both nodes)
 ```bash
-ip addr show ens1f0   # c6525-100g; use ens3f0 on r6525
+ip addr show ens1f0   # c6525-100g
+ip addr show ens2f0   # r650
+ip addr show ens3f0   # r6525
 # Expected: inet 10.10.1.1/24 (node0) or 10.10.1.2/24 (node1)
-# If missing: sudo ip link set ens1f0 up && sudo ip addr add 10.10.1.<N>/24 dev ens1f0
+# If missing: sudo ip link set <iface> up && sudo ip addr add 10.10.1.<N>/24 dev <iface>
 ```
 
 ### Step 2: Verify RDMA on experiment network (both nodes)
 ```bash
 show_gids | grep "mlx5_2.*3"
-# Expected: mlx5_2  1  3  ...10.10.1.x...  v2  ens1f0 (or ens3f0 on r6525)
+# Expected: mlx5_2  1  3  ...10.10.1.x...  v2  ens1f0 / ens2f0 / ens3f0
 
 grep "\[5\] ==" ~/Sherman-CS6204/src/rdma/Resource.cpp
 # Expected: [5] == '2'   (NOT '0')
@@ -273,148 +312,127 @@ cd ~/Sherman-CS6204/build && make -j$(nproc)
 | File | Change | Reason |
 |------|--------|--------|
 | include/Rdma.h | gidIndex=1 -> 3 | RoCE v2, IPv4-mapped GID |
-| include/Common.h | kLockChipMemSize=256*1024 -> auto-detected | Probe actual allocatable NIC on-chip memory (64KB on c6525-100g, 128KB on r6525) |
+| include/Common.h | kLockChipMemSize=256*1024 -> auto-detected | Probe actual allocatable NIC on-chip memory (64KB on c6525-100g, 128KB on r650/r6525) |
 | src/rdma/Resource.cpp | [5]=='0' -> [5]=='2' | Select mlx5_2 (100Gbps experiment) not mlx5_0 (25Gbps control) |
 
 The kLockChipMemSize probe compiles a small C program that calls ibv_exp_alloc_dm() with
 decreasing sizes (128KB, 64KB, 32KB, 16KB) on mlx5_2 to find the actual allocatable limit.
-On c6525-100g this returns 64KB; on r6525 this returns 128KB.
+On c6525-100g this returns 64KB; on r650/r6525 this returns 128KB.
 
 ---
 
-## Part 2: CXL-Emulated Platform (r6525 nodes)
+## Part 2: NUMA-Based CXL Emulation (r650 nodes)
 
 ### Concept
 
-CXL memory adds latency because the CPU must access memory across an external link.
-NUMA emulation replicates this by forcing the Memory Server's allocations onto NUMA node 1
-while its CPU runs on node 0. Every DSM access crosses the AMD Infinity Fabric interconnect,
-producing extra latency analogous to CXL.
+CXL memory adds latency because the CPU accesses memory across an external link. This
+reproduction used r650 dual-socket nodes to approximate that effect by forcing the memory
+server's CPU execution to one NUMA node and its memory allocation to the other NUMA node.
 
-Sherman requires NO code changes -- numactl operates at the OS level and is transparent
-to Sherman. The benchmark binary, RDMA setup, and NIC selection are all unchanged.
+Sherman itself is unchanged for the CXL-style runs. `numactl` changes OS-level CPU and memory
+placement; the RDMA setup, benchmark binary, and NIC selection remain the same.
 
 ```
 CXL:  CPU --> PCIe/CXL link  --> CXL memory pool
-NUMA: CPU (socket 0) --> Infinity Fabric --> DRAM (socket 1)
+NUMA: CPU (socket 0) --> UPI / remote NUMA path --> DRAM (socket 1)
 ```
 
-Why r6525 is required: c6525-100g has a single-socket CPU (AMD 7402P), so all DRAM is
-local and NUMA emulation is impossible. r6525 has two sockets (Two AMD EPYC 7543), giving
-two NUMA nodes with a measurable remote-access penalty.
+The final report used r650 rather than r6525 because r6525 was not available for the final
+experiment window. r650 gives a weaker remote/local distance ratio (`20/10 = 2.0x`) than the
+planned r6525 (`32/10 = 3.2x`), so the report interprets this as NUMA-based CXL emulation,
+not a direct measurement of real CXL hardware.
 
-### Step 0: Confirm NUMA topology (node0, before running anything)
+### Confirm NUMA topology (node0)
 
 ```bash
 numactl --hardware
 ```
 
-Expected output:
+Expected r650 shape:
 ```
 available: 2 nodes (0-1)
-node 0 cpus: 0-31
-node 1 cpus: 32-63
 node distances:
 node   0   1
-  0:  10  32
-  1:  32  10
+  0:  10  20
+  1:  20  10
 ```
 
-If only one node appears, you have a single-socket node -- do not proceed, re-provision.
-The distance ratio (32/10 = 3.2x) quantifies the simulated CXL memory access overhead.
+If only one node appears, the node cannot run the Part 2 emulation.
 
-### Running Part 2 experiments
+### Completed Part 2 result summary
 
-Run the same six workloads twice: once as baseline, once with CXL emulation.
-All pre-run steps (Steps 1-5 above) apply identically to both groups.
-The NIC verification in Step 5 is especially important -- mlx5_0 must show zero traffic.
+Values below are the final observed steady-state values from the tracked result files. Units:
+throughput is Mops; p50 and p99 are microseconds.
 
-**Group 1: r6525 Baseline (native DRAM, no numactl)**
+#### r650 baseline vs CXL emulation, default large index-cache behavior
 
-node0 command:
+| Workload | Access pattern | r650 baseline throughput | r650 baseline p50 | r650 baseline p99 | r650 CXL throughput | r650 CXL p50 | r650 CXL p99 | CXL cache hit |
+|----------|----------------|--------------------------|-------------------|-------------------|---------------------|--------------|--------------|---------------|
+| Write-only | Uniform | 2.396 | 9.5 | 241.3 | 3.464 | 10.6 | 19.1 | 0.998970 |
+| Write-intensive | Uniform | 4.417 | 7.5 | 67.1 | 4.967 | 7.7 | 18.0 | 0.999268 |
+| Read-intensive | Uniform | 8.273 | 4.1 | 16.6 | 8.278 | 5.4 | 16.5 | 0.999745 |
+| Write-only | Skewed | 2.412 | 9.5 | 238.5 | 2.395 | 9.4 | 242.0 | 0.999538 |
+| Write-intensive | Skewed | 4.396 | 7.6 | 68.0 | 4.420 | 7.5 | 67.0 | 0.999742 |
+| Read-intensive | Skewed | 8.287 | 4.1 | 16.5 | 8.298 | 4.1 | 16.5 | 0.999923 |
+
+Interpretation used in the report: with the large index cache, the reproduction mostly measures
+Sherman's cache effectiveness and the r650 platform behavior. The very high cache-hit rates make
+remote-NUMA latency hard to isolate.
+
+#### r650 CXL emulation with 4MB index cache
+
+| Workload | Access pattern | Throughput | p50 | p99 | Final cache hit |
+|----------|----------------|------------|-----|-----|-----------------|
+| Write-only | Uniform | 2.386 | 36.2 | 69.6 | 0.327228 |
+| Write-intensive | Uniform | 3.375 | 30.0 | 61.6 | 0.376913 |
+| Read-intensive | Uniform | 5.476 | 22.5 | 51.9 | 0.452913 |
+| Write-only | Skewed | 2.353 | 18.3 | 79.1 | 0.578404 |
+| Write-intensive | Skewed | 3.547 | 16.4 | 61.3 | 0.599177 |
+| Read-intensive | Skewed | 5.733 | 6.4 | 61.9 | 0.650482 |
+
+Interpretation used in the report: reducing the index cache from the default large setting to
+4MB lowered cache-hit rates and made the remote-memory penalty visible. Skewed workloads retained
+higher cache locality than uniform workloads, which is consistent with repeated access to hot keys.
+
+### Running Part 2 experiments again
+
+All pre-run steps from "Every Time You Run Benchmark" apply. The NIC verification is mandatory:
+`mlx5_2` should carry experiment traffic and `mlx5_0` should remain near zero.
+
+Baseline command on node0:
 ```bash
 cd ~/Sherman-CS6204/build
-sudo bash -c 'ulimit -l unlimited && timeout 150 ./benchmark 2 <read_ratio> 22 2>&1' | tee ~/result_r6525_baseline_<workload>.txt
+sudo bash -c 'ulimit -l unlimited && timeout 150 ./benchmark 2 <read_ratio> 22 2>&1' \
+  | tee ~/result_r650_baseline_<workload>.txt
 ```
 
-node1 command (same time):
-```bash
-cd ~/Sherman-CS6204/build
-sudo bash -c 'ulimit -l unlimited && timeout 150 ./benchmark 2 <read_ratio> 22 2>&1'
-```
-
-Result files: result_r6525_baseline_uniform_writeonly.txt, etc.
-
-**Group 2: r6525 CXL-Emulated (numactl on node0 Memory Server only)**
-
-IMPORTANT: numactl must be inside the sudo call, not outside it. Correct form:
-
+CXL-emulated command on node0:
 ```bash
 cd ~/Sherman-CS6204/build
 sudo numactl --cpunodebind=0 --membind=1 \
   bash -c 'ulimit -l unlimited && timeout 150 ./benchmark 2 <read_ratio> 22 2>&1' \
-  | tee ~/result_r6525_cxl_<workload>.txt
+  | tee ~/result_r650_cxl_<workload>.txt
 ```
 
-node1 command -- unchanged, no numactl needed:
+Node1 command is unchanged for both groups:
 ```bash
 cd ~/Sherman-CS6204/build
 sudo bash -c 'ulimit -l unlimited && timeout 150 ./benchmark 2 <read_ratio> 22 2>&1'
 ```
 
-Result files: result_r6525_cxl_uniform_writeonly.txt, etc.
+For the 4MB sensitivity run, set `kIndexCacheSize = 4` before rebuilding and save output under
+`results/r650_cxl_cache4m/`.
 
 ### Verify numactl is working
 
-While the CXL-emulated benchmark is running, confirm memory is allocated on node 1:
+While the CXL-emulated benchmark is running, confirm memory is allocated on the remote NUMA node:
 ```bash
 # On node0, in a separate terminal
 numastat -p benchmark
-# node1 column should show large and increasing memory usage
-# If node0 column is large instead, numactl was not applied correctly -- stop and fix
 ```
 
-### Part 2 Result Tables (fill in after running)
-
-#### Uniform Workloads
-
-| Workload | Part 1 c6525-100g | r6525 Baseline | r6525 CXL-Emulated |
-|----------|-------------------|----------------|---------------------|
-| Write-only Throughput (Mops) | 3.06 | ? | ? |
-| Write-only p50 (us) | 8.0 | ? | ? |
-| Write-only p99 (us) | 173 | ? | ? |
-| Write-intensive Throughput (Mops) | 5.57 | ? | ? |
-| Write-intensive p50 (us) | 6.5 | ? | ? |
-| Write-intensive p99 (us) | 45 | ? | ? |
-| Read-intensive Throughput (Mops) | 9.75 | ? | ? |
-| Read-intensive p50 (us) | 4.1 | ? | ? |
-| Read-intensive p99 (us) | 12.9 | ? | ? |
-
-#### Skewed Workloads
-
-| Workload | Part 1 c6525-100g | r6525 Baseline | r6525 CXL-Emulated |
-|----------|-------------------|----------------|---------------------|
-| Write-only Throughput (Mops) | 3.06 | ? | ? |
-| Write-only p50 (us) | 8.4 | ? | ? |
-| Write-only p99 (us) | 174 | ? | ? |
-| Write-intensive Throughput (Mops) | 5.57 | ? | ? |
-| Write-intensive p50 (us) | 6.5 | ? | ? |
-| Write-intensive p99 (us) | 44 | ? | ? |
-| Read-intensive Throughput (Mops) | 9.77 | ? | ? |
-| Read-intensive p50 (us) | 4.0 | ? | ? |
-| Read-intensive p99 (us) | 12.9 | ? | ? |
-
-### Analysis checklist (for Part 2 report writing)
-
-- CXL overhead: compare r6525 baseline vs CXL-emulated p50 and p99 -- how much did latency increase?
-- Write vs read sensitivity: write-heavy workloads expected to be more affected because
-  lock acquisition hits remote DRAM on every write; read-heavy workloads benefit from the
-  index cache and avoid remote memory access more often
-- On-chip memory improvement: r6525 has 128KB (16,384 lock entries) vs c6525-100g 64KB
-  (8,192 entries); r6525 baseline skewed p99 should show improvement over Part 1
-- NUMA distance ratio is 3.2x (32/10); check whether measured p50 latency increase is
-  roughly proportional
-- RDMA traffic: verify mlx5_2 transmitted data and mlx5_0 showed zero for both groups
+The remote NUMA column should show large and increasing memory usage. If local memory dominates,
+stop and check that the command uses `sudo numactl ... bash -c '...'`.
 
 ---
 
